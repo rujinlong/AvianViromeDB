@@ -527,3 +527,153 @@ read_amg <- function(fin_amg, amg_source) {
 
   return(df_amg)
 }
+
+
+
+
+#' Convert a taxonomy data frame to a Sankey plot data frame
+#'
+#' This function converts a taxonomy data frame into a Sankey plot data frame,
+#' which can be used to create a Sankey plot using the `networkD3` package.
+#'
+#' @param df_taxonomy A data frame containing taxonomy information with
+#'   columns representing different taxonomic levels.
+#'
+#' @param level_cols A character vector specifying the taxonomic levels
+#'   to include in the Sankey plot.
+#'
+#' @return A list containing two data frames:
+#'   - `links`: A data frame with source and target columns for the Sankey plot.
+#'   - `nodes`: A data frame with node names and group assignments for coloring nodes.
+#'
+#' @importFrom magrittr %>%
+#' @importFrom data.table fread
+#' @importFrom data.table setnames
+#' @importFrom dplyr mutate
+#' @importFrom dplyr if_else
+#' @importFrom dplyr select
+#' @importFrom dplyr filter
+#' @importFrom dplyr distinct
+#' @importFrom dplyr left_join
+#' @importFrom stringr str_detect
+#' @importFrom dplyr group_by
+#' @importFrom dplyr summarise
+#' @importFrom dplyr rename
+#' @importFrom dplyr sym
+#' @importFrom dplyr all_of
+#' @importFrom networkD3 sankeyNetwork
+#' @importFrom tidyr separate
+#' @importFrom tidyr unite
+#' @importFrom tidyr pivot_longer
+#' @importFrom tidyr pivot_wider
+#' @importFrom tidyr fill
+#' @importFrom tidyr replace_na
+#'
+#' @examples
+#' \dontrun{
+#' # Assuming 'df_taxonomy' is the taxonomy data frame
+#' df_sankey <- df_to_sankey(df_taxonomy, c("realm", "kingdom", "phylum", "class", "order", "family", "genus", "species"))
+#' }
+df_to_sankey <- function(df_taxonomy, level_cols) {
+  # --- 1. Prepare Links Data ---
+  # This section transforms your table into a list of source-target links with counts.
+  # Initialize an empty list to store the links
+  links_list <- list()
+  for (i in 1:(length(level_cols) - 1)) {
+    # Check if both source and target columns exist in the dataframe
+    source_col <- level_cols[i]
+    target_col <- level_cols[i+1]
+
+    if (!(source_col %in% names(df_taxonomy)) || !(target_col %in% names(df_taxonomy))) {
+      warning(paste("Skipping link creation between", source_col, "and", target_col, "- one or both columns not found."))
+      next # Skip to the next iteration if columns are missing
+    }
+
+    # --- MODIFIED SECTION START ---
+    link_data <- df_taxonomy %>%
+      # Select the source and target columns using their string names safely
+      dplyr::select(all_of(c(source_col, target_col))) %>%
+      # Ensure columns are character type using across()
+      dplyr::mutate(across(all_of(c(source_col, target_col)), as.character)) %>%
+      # Remove rows where source or target might be NA or empty strings
+      # Use .data[[var]] notation for filtering with string variables
+      dplyr::filter(!is.na(.data[[source_col]]), !is.na(.data[[target_col]]),
+             .data[[source_col]] != "", .data[[target_col]] != "") %>%
+      # Count the occurrences of each unique link (source-target pair)
+      # Group by the original column names using !!sym()
+      dplyr::group_by(!!dplyr::sym(source_col), !!dplyr::sym(target_col)) %>%
+      dplyr::summarise(value = dplyr::n(), .groups = 'drop') %>%
+      # Rename the columns to 'source' and 'target' AFTER summarising
+      dplyr::rename(source = !!dplyr::sym(source_col), target = !!dplyr::sym(target_col))
+    # --- MODIFIED SECTION END ---
+
+    if (nrow(link_data) > 0) {
+        links_list[[length(links_list) + 1]] <- link_data
+    }
+  }
+
+  # Combine all links from different levels into one data frame
+  if (length(links_list) > 0) {
+    links <- dplyr::bind_rows(links_list)
+  } else {
+    stop("Error: No valid links could be created. Check column names and data content.")
+  }
+
+
+  # --- 2. Create Nodes Data Frame ---
+
+  # Get unique node names from all valid sources and targets
+  nodes <- data.frame(name = unique(c(links$source, links$target)), stringsAsFactors = FALSE)
+
+  # Add a 'group' column (optional) - for coloring nodes by taxonomic rank
+  # This assigns the group based on the highest taxonomic rank the name appears in
+  nodes$group <- NA # Initialize
+  for(col_name in level_cols) {
+    if (col_name %in% names(df_taxonomy)) { # Check if column exists before accessing
+        # Ensure column exists before trying to access it
+        if(col_name %in% names(df_taxonomy)) {
+            current_level_nodes <- unique(df_taxonomy[[col_name]])
+            # Ensure comparison is done with character type
+            current_level_nodes <- as.character(current_level_nodes)
+            nodes$group[nodes$name %in% current_level_nodes & is.na(nodes$group)] <- col_name
+        }
+    }
+  }
+  # Assign a default group if any NA remains
+  nodes$group[is.na(nodes$group)] <- "Unknown"
+
+
+  # --- 3. Map Node Names to Zero-Based IDs ---
+  # networkD3 requires numeric, 0-indexed IDs for sources and targets.
+
+  # Create the 0-based ID for each node
+  nodes$ID <- 0:(nrow(nodes) - 1)
+
+  # Add source and target IDs to the links data frame by matching names
+  # Ensure links$source and links$target are character for matching
+  links$source <- as.character(links$source)
+  links$target <- as.character(links$target)
+  nodes$name <- as.character(nodes$name)
+
+  links$sourceID <- match(links$source, nodes$name) - 1
+  links$targetID <- match(links$target, nodes$name) - 1
+
+  # Check for NAs in IDs - indicates a mismatch if any exist
+  if(any(is.na(links$sourceID)) || any(is.na(links$targetID))) {
+      warning("NA values generated during ID matching. Check consistency between links and nodes.")
+      # Optional: Filter out links with NA IDs if needed
+      # links <- links %>% filter(!is.na(sourceID), !is.na(targetID))
+  }
+
+
+  # Prepare the final links data frame for plotting (only needs IDs and value)
+  # Ensure source/target are integers
+  links_for_plot <- links %>%
+      dplyr::filter(!is.na(sourceID), !is.na(targetID)) %>% # Remove links with potential NA IDs
+      dplyr::select(source = sourceID, target = targetID, value) %>%
+      dplyr::mutate(source = as.integer(source), target = as.integer(target)) %>%
+      # convert to a plain data frame
+      as.data.frame()
+
+  return(list(links = links_for_plot, nodes = nodes))
+}

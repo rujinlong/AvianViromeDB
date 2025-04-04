@@ -1,0 +1,128 @@
+html {
+  height: 100%;
+}
+
+body {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.wrapper, #shiny-disconnected-overlay, .container-fluid, .main-content {
+  flex: 1 0 auto;
+}
+
+.sticky-footer {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: auto;
+  background-color: #f8f9fa;
+  border-top: 1px solid #dee2e6;
+  padding: 1.5rem 0;
+}
+
+.white-icon-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.white-icon-container i,
+.white-icon-container .fa {
+  color: #ffffff !important;
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+.bslib-value-box .value-box-showcase i,
+.bslib-value-box .value-box-showcase .fa,
+.bslib-value-box.default .value-box-showcase > i,
+.bslib-value-box.default .value-box-showcase > .fa {
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+}
+
+.card-header i,
+.card-header .fa {
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+}
+
+.footer {
+  flex-shrink: 0;
+  background-color: #f8f9fa;
+  border-top: 1px solid #dee2e6;
+  padding: 1.5rem 0;
+  width: 100%;
+  margin-top: auto;
+}
+
+.footer-spacer {
+  margin-top: 3rem;
+  width: 100%;
+}
+
+.container-fluid, .container {
+  padding-bottom: 0rem;
+}
+
+.content-wrapper {
+  margin-bottom: 0rem;
+}
+
+.footer-separator {
+  margin-top: 1rem;
+  margin-bottom: 0rem;
+  border: 0;
+  border-top: 0px solid rgba(0, 0, 0, 0);
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  margin-bottom: 100px;
+}
+
+.footer {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: auto;
+  background-color: #f8f9fa;
+  border-top: 1px solid #dee2e6;
+  padding: 1.5rem 0;
+}
+
+.footer-spacer {
+  margin-top: 3rem;
+  width: 100%;
+  height: 50px;
+}
+
+hr.invisible, .invisible-separator {
+  border: 0;
+  height: 2rem;
+  margin: 0;
+  background-color: transparent;
+}
+
+hr {
+  border: 0;
+  height: 2rem;
+  margin: 0;
+  background-color: transparent;
+}

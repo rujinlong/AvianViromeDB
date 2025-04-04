@@ -1,0 +1,22 @@
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+# AvianViromeDB <img src="www/logo_R.png" align="right" width="120" />
+
+<!-- badges: start -->
+
+[![License](https://img.shields.io/badge/license-GPL%20%28%3E%3D%203%29-blue)](https://www.gnu.org/licenses/gpl-3.0.en.html)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15660656.svg)](https://doi.org/10.5281/zenodo.15660656)
+
+<!-- badges: end -->
+
+## Overview
+
+AvianViromeDB is a comprehensive database for exploring and analyzing
+avian bacteriophage (virome) sequences. The database contains
+bacteriophage sequences identified from public NGS sequencing data of
+avian samples. The sequences have been assembled into contigs,
+annotated, and classified taxonomically.
+
+The database can be accessed at
+[AvianViromeDB](https://phagebyte.github.io/avianviromedb).

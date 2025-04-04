@@ -1,0 +1,286 @@
+---
+title: "57-fig7"
+title-block-banner: true
+author:
+  - name: Xueqin Yang
+date: 2025-04-28
+toc: true
+toc-depth: 4
+number-sections: true
+code-fold: true
+code-line-numbers: true
+code-tools: true
+format: 
+  html:
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: full
+reference-location: section
+citation-location: document
+params:
+  name: "57-fig7"
+---
+
+**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
+
+The purpose of this document is ...
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "57-fig7")
+here::i_am(paste0(params$name, ".qmd"), uuid = "0e475c0e-6547-4a8a-aeba-115b67462591")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+#| warning: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  library(data.table)
+  library(plotrix)
+  library(svglite)
+  library(RColorBrewer)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+## Tasks
+
+The first task is ...
+
+```{r load data}
+df_metadata_filter <- dbReadTable(con, "contig_annotation_filtered_vOTU") %>% 
+  dplyr::mutate(contig_id = contig_repid)
+df_metadata_amg <- dbReadTable(con, "amg_dramv_filtered")
+
+gene_id <- df_metadata_amg[,c("contig_id","protein_id","dbid","module","sheet","header")] %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(dbid = ifelse(dbid == "", "Unclassified", dbid)) %>%
+  dplyr::mutate(sheet = ifelse(sheet == "carbon utilization (Woodcroft)", "carbon utilization", sheet)) %>%
+  dplyr::mutate(sheet = ifelse(sheet == "carbon utilization", "Carbon utilization", sheet)) %>%
+  dplyr::left_join(df_metadata_filter[,c("contig_id","vOTU_id")], by = "contig_id") %>% 
+  dplyr::filter(!is.na(vOTU_id))
+```
+
+
+```{r fig7A}
+df <- gene_id %>%
+  dplyr::select(c("vOTU_id", "protein_id", "sheet")) %>%
+  dplyr::distinct() %>%
+  dplyr::count(sheet) %>%
+  dplyr::mutate(per=n/sum(n)) %>%
+  dplyr::mutate(label = paste0(sprintf("%.2f", per * 100), '%')) %>%
+  dplyr::arrange(desc(n))
+
+color <- c("MISC" = "#D97CD9",
+           "Organic Nitrogen" = "#FFC16D",
+           "Carbon utilization" = "#64B9FF",
+           "Transporters" = "#34BA3D",
+           "Unclassified" = "#9E9F9E",
+           "Energy" = "#1E5DA5")
+
+svglite(path_target("Figure7A_pie3d.svg"))
+pie3D(df$n,radius=1,height =0.1,theta=pi/5, start = pi/2,
+      col = color,
+      edges = 6000,
+      border = "white",shade = 0.7,labels=df$label,labelcol = "black",
+      labelcex=1.6,explode=0.08)
+dev.off()
+
+p7a <- ggplot(df, aes(x=sheet, y=n, fill=sheet)) +
+  geom_bar(width = 1, stat = "identity") +
+  theme(text=element_text(family="serif")) +
+  theme(legend.title=element_text(face="bold", size=rel(2)), 
+        legend.text=element_text(size=rel(1.1)),
+        legend.key=element_rect(fill="transparent")) +
+  scale_fill_manual(values = color)
+
+ggsave(path_target("Figure7A_pie3d_legend.svg"), plot = p7a, width = 8, height = 6)
+```
+
+
+```{r fig7B}
+header_protein <- gene_id %>%
+  dplyr::select(vOTU_id, protein_id, header, sheet) %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(header = dplyr::case_when(
+    header == "anaerobic corrin ring synthesis" ~ "Aerobic corrin ring synthesis",
+    header == "aerobic corrin ring synthesis" ~ "Aerobic corrin ring synthesis",
+    header == "central carbon" ~ "Central carbon",
+    header == "hydrocarbon degradation" ~ "Hydrocarbon degradation",
+    header == "pyruvate metabolism" ~ "Pyruvate metabolism",
+    header == "sugar utilization (woodcroft)" ~ "Sugar utilization (woodcroft)",
+    TRUE ~ header
+  )) %>%
+  # Summarize protein counts by header and calculate frequency
+  dplyr::group_by(header) %>%
+  dplyr::summarise(
+    sheet = paste(unique(sheet), collapse = ", "),
+    unique_protein = n_distinct(protein_id)
+  ) %>%
+  dplyr::mutate(frequency = unique_protein / sum(unique_protein)) %>%
+  dplyr::arrange(desc(frequency)) %>%
+  dplyr::ungroup()
+
+p7b <- header_protein %>% 
+  ggplot(aes(x = reorder(header, unique_protein), y = unique_protein, fill = sheet)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = unique_protein), vjust = 0.5, size = 5) + 
+  scale_y_continuous(breaks = c (1000,6000)) +
+  coord_flip() +  
+  labs(title = "Number of AMGs", x = "", y = "") +
+  theme_minimal() +
+  theme_bw() +
+  theme(
+    text = element_text(size = 18),
+    axis.text.x = element_text(color = "black", size = 15),
+    axis.text.y = element_text(color = "black", size = 15),
+    axis.title.x = element_text(color = "black", size = 13),
+    axis.title.y = element_text(color = "black", size = 13),
+    axis.line = element_line(color = "black", linewidth = 0.5),
+    legend.text = element_text(size = 15),
+    legend.title = element_blank(),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()) + 
+  scale_fill_manual(values = color, limits = c("MISC","Organic Nitrogen","Carbon utilization",
+                                               "Transporters","Energy","Unclassified"))
+
+ggsave(path_target("Figure7B_amg_header_amgs.svg"), plot = p7b, width = 7, height = 7)
+```
+
+
+```{r fig7C}
+##figure6D1
+module <- gene_id[,c("contig_id","protein_id","module","sheet")]
+
+module_counts <- module %>%
+  dplyr::group_by(module) %>%
+  dplyr::summarise(sheet = paste(unique(sheet), collapse = ", "),
+         unique_protein = n_distinct(protein_id)) %>%  
+  dplyr::arrange(desc(unique_protein))
+
+p7c <- ggplot(module_counts, aes(x = reorder(module, unique_protein), y = log10(unique_protein), fill = sheet, color = sheet)) +
+  geom_point(size = 8) +        
+  geom_bar(stat = "identity", width = 0.2) + 
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(color = "black", size = 22),
+    axis.text.y = element_text(color = "black", size = 22), 
+    axis.title.x = element_text(color = "black", size = 22),
+    axis.title.y = element_text(color = "black", size = 22), 
+    axis.line.x = element_line(color = "black", linewidth = 0.5),  
+    axis.line.y = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5), 
+    axis.ticks.y = element_line(color = "black", linewidth = 0.5),  
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    plot.title = element_text(size = 22, face = "bold", hjust = 0.5)
+  ) +
+  labs(title = "", 
+       x = "",
+       y = "Number of Phage Genomes (Log10)") +
+  scale_fill_manual(values = color)+
+  scale_color_manual(values = color)+
+  coord_flip() +
+  theme(legend.position = "none")
+
+
+ggsave(path_target("Figure7C_Functional_annotations.svg"), plot = p7c, width = 20,height =15)
+```
+
+
+```{r fig7D}
+# Read a table into an R data frame
+df_metadata <- dbReadTable(con, "contig_annotation")
+df_metadata_filter <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+
+sample_host <- dbReadTable(con, "sample_metadata") %>%
+  dplyr::select(c("sample_host","study_id")) %>%
+  dplyr::distinct() %>%
+  dplyr::right_join(df_metadata[, c("study_id","contig_id", "vOTU_id")], by = "study_id") %>%
+  dplyr::select(c("vOTU_id","sample_host")) %>%
+  dplyr::right_join(df_metadata_filter[, c("vOTU_id", "contig_repid")], by = "vOTU_id") %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(sample_host = ifelse(sample_host %in% c("Grus", "Pigeon","Egret", "Migratory birds", "Coturnix"), "Other birds", sample_host)) %>%
+  dplyr::mutate(contig_id = contig_repid) %>% 
+  dplyr::select(c("contig_id","sample_host")) %>%
+  dplyr::distinct()
+
+p7c2data <- module %>%
+  dplyr::group_by(module) %>%
+  dplyr::mutate(unique_protein = n_distinct(protein_id)) %>%  
+  dplyr::arrange(desc(unique_protein)) %>%
+  dplyr::left_join(sample_host, by = "contig_id",relationship = "many-to-many") %>%
+  dplyr::distinct() %>%
+  dplyr::select(c("protein_id","module","unique_protein","sample_host")) %>%
+  dplyr::group_by(module, sample_host) %>%
+  dplyr::summarise(sample_host_Count = n(), 
+            unique_protein = paste(unique(unique_protein), collapse = ", "),
+            .groups = 'drop') %>%  
+  dplyr::group_by(module) %>%
+  dplyr::mutate(Percentage =sample_host_Count / sum(sample_host_Count) * 100) %>%
+  dplyr::mutate(unique_protein = as.numeric(unique_protein)) %>%
+  dplyr::arrange(desc(unique_protein)) %>%
+  dplyr::filter(unique_protein > 4) %>%
+  dplyr::mutate(sample_host = factor(sample_host, levels = c("Chicken", "Duck", "Goose", "Other birds")))
+
+sample_color <- c("Chicken" = "#F9B063", "Duck" = "#FAF5B5", "Goose"= "#778ccc", "Other birds"="#BCB9DB" )
+
+p7c2 <- ggplot(p7c2data, aes(x = reorder(module, unique_protein), y = Percentage, fill = sample_host)) +
+  geom_bar(stat = "identity",width = 0.8) +
+  scale_y_continuous(expand = c(0.02,0.8),
+                     labels = function(x) paste0(x, "%"), 
+                     breaks = c (0, 100)) +
+  scale_x_discrete(expand = c(0.02,0)) + 
+  labs(x = "", y = "Sample host", fill = "") +
+  theme_bw() +
+  theme(
+    panel.border = element_rect(color = "black"),
+    axis.text.x = element_text(color = "black", size = 22,margin = margin(r = 100)),
+    axis.text.y = element_text(color = "black", size = 22,margin = margin(l = -100)), 
+    axis.title.x = element_text(color = "black", size = 22),
+    axis.title.y = element_text(color = "black", size = 22), 
+    axis.line = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5), 
+    axis.ticks.y =  element_blank(),
+    panel.grid = element_blank(), 
+    legend.text = element_text(size = 25), 
+    plot.margin = unit(c(0.3, 0.7, 0, 0), "cm") ,
+    legend.position = "right",
+    plot.title = element_text(size = 22, face = "", hjust = 0.5)
+  ) +
+  theme(axis.text.y = element_blank()) + 
+  coord_flip() +
+  scale_fill_manual(values = brewer.pal(7, "Set3")) 
+
+ggsave(path_target("Figure7D_AMG_sample.svg"), p7c2, width = 5.5, height = 15)
+```
+
+
+## Files written
+
+These files have been written to the target directory, `r paste0("data/", params$name)`:
+
+```{r list-files-target}
+projthis::proj_dir_info(path_target(), tz = "CET")
+```

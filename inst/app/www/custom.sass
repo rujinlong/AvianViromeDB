@@ -1,1 +1,123 @@
+// Sticky Footer
+html
+  height: 100%
 
+body
+  position: relative
+  min-height: 100vh
+  display: flex
+  flex-direction: column
+  margin: 0
+
+// Make the main content area grow to push footer down
+.wrapper, #shiny-disconnected-overlay, .container-fluid, .main-content
+  flex: 1 0 auto
+
+.sticky-footer
+  position: absolute
+  bottom: 0
+  width: 100%
+  height: auto
+  background-color: #f8f9fa
+  border-top: 1px solid #dee2e6
+  padding: 1.5rem 0
+
+// Custom White Icons for Value Boxes and Cards
+.white-icon-container 
+  display: flex
+  align-items: center
+  justify-content: center
+
+.white-icon-container i, 
+.white-icon-container .fa 
+  color: #ffffff !important
+  background: none !important
+  -webkit-background-clip: initial !important
+  -webkit-text-fill-color: #ffffff !important
+
+// Override Bootstrap styles for value box icons
+.bslib-value-box .value-box-showcase i,
+.bslib-value-box .value-box-showcase .fa,
+.bslib-value-box.default .value-box-showcase > i,
+.bslib-value-box.default .value-box-showcase > .fa 
+  background: none !important
+  -webkit-background-clip: initial !important
+  -webkit-text-fill-color: #ffffff !important
+  color: #ffffff !important
+
+// Ensure card header icons are white
+.card-header i, 
+.card-header .fa 
+  background: none !important
+  -webkit-background-clip: initial !important
+  -webkit-text-fill-color: #ffffff !important
+  color: #ffffff !important
+
+// Footer styling for sticky positioning
+.footer
+  flex-shrink: 0
+  background-color: #f8f9fa
+  border-top: 1px solid #dee2e6
+  padding: 1.5rem 0
+  width: 100%
+  margin-top: auto  // This helps push it to the bottom
+
+// Footer spacer styling
+.footer-spacer
+  margin-top: 3rem
+  width: 100%
+
+// Apply padding to the main content container
+.container-fluid, .container
+  padding-bottom: 0rem  // Add space at the bottom of content containers
+
+// If you have access to the wrapper around all page content, you can add:
+.content-wrapper
+  margin-bottom: 0rem
+
+// Footer separator styling
+.footer-separator
+  margin-top: 1rem
+  margin-bottom: 0rem
+  border: 0
+  border-top: 0px solid rgba(0,0,0,0)
+  width: 100%
+  margin-left: auto
+  margin-right: auto
+
+// Alternative approach - fixed footer
+html
+  position: relative
+  min-height: 100%
+
+body
+  margin-bottom: 100px  // Adjust based on your footer height
+
+.footer
+  position: absolute
+  bottom: 0
+  width: 100%
+  height: auto  // Adjust as needed
+  background-color: #f8f9fa
+  border-top: 1px solid #dee2e6
+  padding: 1.5rem 0
+
+// Footer spacer for when content is long
+.footer-spacer
+  margin-top: 3rem
+  width: 100%
+  height: 50px  // Add extra space before footer
+
+// Invisible horizontal separator
+hr.invisible, .invisible-separator
+  border: 0
+  height: 2rem
+  margin: 0
+  background-color: transparent
+
+// Or to make ALL hr elements invisible
+hr
+  border: 0
+  height: 2rem
+  margin: 0
+  background-color: transparent

@@ -1,0 +1,535 @@
+---
+title: "Dashboard-pc028e3"
+format: dashboard
+---
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "94-dashboard")
+here::i_am(paste0(params$name, ".qmd"), uuid = "28f1b231-9316-4da7-8e8c-de23853f1dca")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  library(data.table)
+  library(reactable)
+  library(plotly)
+  library(networkD3)
+  library(shiny)
+  library(UpSetR)
+  library(grid)
+  library(tidygraph)
+  library(ggraph)      # 用于网络可视化 (For network visualization)
+  library(igraph)      # 提供核心图算法 (Provides core graph algorithms)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+# Contig annotation
+
+## Row
+
+### vOTU and VC districution
+
+```{r}
+df_ctganno_filtered <- DBI::dbGetQuery(con, "SELECT * FROM contig_annotation_filtered")
+
+df_ctganno <- DBI::dbGetQuery(con, "SELECT * FROM contig_annotation") %>% 
+  dplyr::filter(vc_id %in% df_ctganno_filtered$vc_id)
+
+# 读取 contig_annotation_filtered_vOTU 表，用这个表里的 vOTU_id 筛选 contig_annotation 表
+df_ctganno_filtered_vOTU <- DBI::dbGetQuery(con, "SELECT * FROM contig_annotation_filtered_vOTU")
+
+host_species <- c("Chicken", "Duck", "Goose", "Bird", "Coturnix", "Pigeon", "Egret")
+```
+
+```{r upsetplot by vOTU}
+df_votu2host <- DBI::dbGetQuery(con, "SELECT * FROM contig_annotation") %>%    # 读取原始的  contig_annotation 表
+  dplyr::select(c("vOTU_id", paste0("host_", host_species))) %>% 
+  dplyr::filter(vOTU_id %in% df_ctganno_filtered_vOTU$vOTU_id) %>%    # 只保留 在 df_ctganno_filtered_vOTU 表里的 vc_id
+  # aggregate by vOTU_id, and sum the values of each host species
+  dplyr::group_by(vOTU_id) %>%
+  dplyr::summarise(across(everything(), sum)) %>%
+  dplyr::ungroup() %>% 
+  tidyr::pivot_longer(cols = -vOTU_id, names_to = "sample_host", values_to = "value") %>% 
+  dplyr::filter(value > 0) %>% 
+  dplyr::mutate(sample_host = gsub("host_", "", sample_host)) %>%
+  dplyr::select(-value) %>% 
+  # 将 "Chicken", "Duck", "Goose" 以外的 `sample_host` 都改为 "Other birds"
+  dplyr::mutate(sample_host = ifelse(sample_host %in% c("Chicken", "Duck", "Goose"), sample_host, "Other birds")) %>%
+  dplyr::select(c("vOTU_id", "sample_host")) %>% 
+  dplyr::distinct()
+
+upset(
+  fromList(split(df_votu2host[["vOTU_id"]], df_votu2host[["sample_host"]])),
+  nsets = 10,
+  nintersects = NA,
+  order.by = "freq",
+  decreasing = TRUE,
+  mainbar.y.label = "Number of vOTUs",
+  sets.x.label = "Total vOTUs per Host"
+)
+```
+
+
+```{r upsetplot by VC}
+df_vc2host <- DBI::dbGetQuery(con, "SELECT * FROM contig_annotation") %>%   # 读取原始的  contig_annotation 表
+  dplyr::select(c("vc_id", paste0("host_", host_species))) %>% 
+  dplyr::filter(vc_id %in% df_ctganno_filtered_vOTU$vc_id) %>%    # 只保留 在 df_ctganno_filtered_vOTU 表里的 vc_id
+  # aggregate by vc_id, and sum the values of each host species
+  dplyr::group_by(vc_id) %>%
+  dplyr::summarise(across(everything(), sum)) %>%
+  dplyr::ungroup() %>% 
+  tidyr::pivot_longer(cols = -vc_id, names_to = "sample_host", values_to = "value") %>% 
+  dplyr::filter(value > 0) %>% 
+  dplyr::mutate(sample_host = gsub("host_", "", sample_host)) %>%
+  dplyr::select(-value) %>% 
+  dplyr::mutate(sample_host = ifelse(sample_host %in% c("Chicken", "Duck", "Goose"), sample_host, "Other birds")) %>%
+  dplyr::select(c("vc_id", "sample_host")) %>% 
+  dplyr::distinct()
+
+upset(
+  fromList(split(df_vc2host[["vc_id"]], df_vc2host[["sample_host"]])),
+  nsets = 10,
+  nintersects = NA,
+  order.by = "freq",
+  decreasing = TRUE,
+  mainbar.y.label = "Number of VCs",
+  sets.x.label = "Total VCs per Host"
+)
+```
+
+### Core VC
+
+```{r}
+df_vc2host_wide <- df_vc2host %>% 
+  dplyr::mutate(n = 1) %>% 
+  # convert to wide format, names from sample_host2, value is sum of n
+  tidyr::pivot_wider(names_from = "sample_host", values_from = "n", values_fill = list(n = 0)) %>% 
+  dplyr::filter(rowSums(dplyr::across(where(is.numeric))) >= 3)
+
+df_vcontact_flt <- DBI::dbGetQuery(con, "SELECT * FROM vcontact") %>% 
+  dplyr::filter(vc_id %in% df_vc2host_wide$vc_id)
+
+df_ctg_flt <- df_ctganno %>% 
+  dplyr::filter(vc_id %in% df_vc2host_wide$vc_id) %>% 
+  dplyr::filter(vc_id == "VC72666")
+
+df_amg_dramv_flt <- DBI::dbGetQuery(con, "SELECT * FROM amg_dramv") %>% 
+  dplyr::filter(contig_id %in% df_ctg_flt$contig_id)
+
+df_amg_vibrant_flt <- DBI::dbGetQuery(con, "SELECT * FROM amg_vibrant") %>% 
+  dplyr::filter(contig_id %in% df_ctg_flt$contig_id)
+
+df_ctg_vibrant_flt <- df_ctg_flt %>% 
+  dplyr::filter(contig_id %in% df_amg_vibrant_flt$contig_id)
+
+df_host_flt <- DBI::dbGetQuery(con, "SELECT * FROM host") %>% 
+  dplyr::filter(contig_id %in% df_ctg_flt$contig_id) %>% 
+  dplyr::select("Host.taxonomy") %>% 
+  distinct()
+
+df_amg_vibrant_flt %>% 
+  dplyr::select("contig_id") %>% 
+  distinct() %>% 
+  fwrite(path_target("flt_amg_vibrant.txt"), sep = "\t", col.names = FALSE)
+```
+
+
+
+### Length distribution
+
+```{r}
+p <- df_ctganno_filtered %>% 
+  ggplot(aes(x = contig_length)) +
+  geom_histogram(bins = 100) +
+  scale_x_log10() +
+  theme_minimal() +
+  labs(
+    title = "Contig length distribution",
+    x = "Contig length (bp)",
+    y = "Count"
+  )
+
+ggplotly(p)
+```
+
+### genomad score
+
+```{r}
+p <- df_ctganno_filtered %>% 
+  ggplot(aes(x = genomad_virus_score)) +
+  geom_histogram(bins = 20) +
+  theme_minimal() +
+  labs(
+    title = "Genomad score distribution",
+    x = "Genomad score",
+    y = "Count"
+  )
+
+ggplotly(p)
+```
+
+
+### Completeness distribution
+
+```{r}
+p <- df_ctganno_filtered %>% 
+  ggplot(aes(x = checkv_completeness)) +
+  geom_histogram(bins =100) +
+  theme_minimal() +
+  labs(
+    title = "Completeness distribution",
+    x = "Completeness score",
+    y = "Count (log10)"
+  )
+
+ggplotly(p)
+```
+
+
+## Row2
+
+### Quality
+
+```{r}
+p <- df_ctganno_filtered %>% 
+  ggplot(aes(x = checkv_quality_score, fill = lifestyle)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(
+    title = "Contig quality distribution by checkv_provirus type",
+    x = "CheckV quality score",
+    y = "Count"
+  )
+
+ggplotly(p)
+```
+
+### Contamination distribution
+
+
+```{r}
+# change y to log10 scale
+p <- df_ctganno_filtered %>% 
+  ggplot(aes(x = checkv_contamination)) +
+  geom_histogram(bins = 100) +
+  theme_minimal() +
+  labs(
+    title = "Contamination distribution",
+    x = "Contamination score",
+    y = "Count (log10)"
+  )
+
+ggplotly(p)
+```
+
+
+### Sankey plot
+
+
+```{r}
+taxonomy_cols <- c("realm", "kingdom", "phylum", "class", "order", "family")
+df_taxonomy <- df_ctganno_filtered %>% 
+  dplyr::select(c("vc_id", taxonomy_cols)) %>% 
+  dplyr::distinct() %>% 
+  # replace all cell values contains "[" with "Unknown"
+  dplyr::mutate(order = ifelse(str_detect(order, "\\["), str_c("Unknown ", class), order))
+  
+df2sankey <- df_to_sankey(df_taxonomy, taxonomy_cols)
+sankey_plot <- sankeyNetwork(Links = df2sankey$links, Nodes = df2sankey$nodes,
+                             Source = "source", Target = "target", Value = "value", # Link properties
+                             NodeID = "name",     # Node property: Label to display
+                             NodeGroup = "group", # Node property: Color nodes by this column
+                             fontSize = 12, nodeWidth = 30,
+                             sinksRight = FALSE) # Keep hierarchy left-to-right
+
+# Display the plot
+sankey_plot
+
+# --- Save the Plot ---
+# If you want to save the plot as an interactive HTML file:
+htmlwidgets::saveWidget(sankey_plot, path_target("taxonomy_sankey_plot.html"))
+```
+
+### distribution virsorter2 score
+
+```{r}
+p <- df_ctganno_filtered %>% 
+  ggplot(aes(x = virsorter2_score)) +
+  geom_histogram(bins = 10) +
+  theme_minimal() +
+  labs(
+    title = "VirSorter2 score distribution",
+    x = "VirSorter2 score",
+    y = "Count"
+  )
+
+ggplotly(p)
+```
+
+## Row 3
+
+### barplot of virsorter2 groups
+
+```{r}
+p <- df_ctganno_filtered %>% 
+  ggplot(aes(x = virsorter2_group)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(
+    title = "VirSorter2 group distribution",
+    x = "VirSorter2 group",
+    y = "Count"
+  )
+
+ggplotly(p)
+
+table(df_ctganno_filtered$virsorter2_group)
+```
+
+
+### tmp
+
+```{r}
+p <- df_ctganno_filtered %>% 
+  ggplot(aes(x = vc_novel_genus, fill = vc_with_ref, color = lifestyle)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(
+    title = "VC novel genus distribution",
+    x = "VC novel genus",
+    y = "Count"
+  )
+
+ggplotly(p)
+```
+
+
+### VIBRANT quality score
+
+```{r}
+p <- df_ctganno_filtered %>% 
+  ggplot(aes(x = vibrant_quality_score)) +
+  geom_histogram(bins = 20) +
+  theme_minimal() +
+  labs(
+    title = "VIBRANT quality score distribution",
+    x = "VIBRANT quality score",
+    y = "Count"
+  )
+
+ggplotly(p)
+```
+
+```{r}
+n_distinct(df1$Chicken)
+```
+
+```{r}
+df_metadata <- openxlsx::read.xlsx(here(path_raw, "pc028e3-metadata.xlsx"), sheet = "metadata") %>% 
+  distinct()
+  dplyr::select(c("study_id", "project_id", "sample_host", "geo_loc_name", "sample_id_raw")) %>% 
+  dplyr::distinct()
+```
+
+```{r}
+df2 <- n_distinct(df_metadata$sample_id_raw)
+df2[df2>1]
+```
+
+
+
+## Cytoscape
+
+```{r}
+df_edges <- fread(here(path_raw, "hpc/vc3/cytoscape/edges_hq.csv")) %>% 
+  dplyr::filter(weight > 0.1)
+
+# df_edges_sel <- df_edges %>% 
+#   dplyr::filter(source==10 & target==104)
+
+all_nodes <- unique(c(df_edges$source, df_edges$target))
+
+df_nodes <- fread(here(path_raw, "hpc/vc3/cytoscape/nodes_hq.csv")) %>% 
+  dplyr::inner_join(df_ctganno_filtered_vOTU, by = c("GenomeName" = "contig_repid")) %>% 
+  dplyr::mutate(is_reference = ifelse(str_detect(GenomeName, "contig"), "no", "yes")) %>% 
+  dplyr::filter(id %in% all_nodes)
+
+
+df_edges_flt <- df_edges %>% 
+  dplyr::filter(source %in% df_nodes$id & target %in% df_nodes$id)
+
+n_distinct(df_nodes$vc_id)
+
+
+fwrite(df_edges_flt, path_target("edges_hq.tsv"), sep = "\t")
+fwrite(df_nodes, path_target("nodes_hq.tsv"), sep = "\t")
+
+# graph_obj <- tbl_graph(nodes = df_nodes, edges = df_edges, directed = FALSE)
+```
+
+```{r}
+df_mcl13 <- fread(path_target("mcl13.tsv.csv"), sep = "\t", header=F) %>% 
+  dplyr::rename(id = V1) %>% 
+  rownames_to_column("mcl_id") %>% 
+  dplyr::mutate(mcl_id = str_c("mc_", mcl_id)) %>% 
+  tidyr::separate_rows(id, sep = ",") %>% 
+  # convert id to numeric
+  dplyr::mutate(id = as.numeric(id))
+```
+
+```{r}
+df_nodes_mcl <- df_nodes %>% 
+  dplyr::left_join(df_mcl13, by = "id")
+
+fwrite(df_nodes_mcl, path_target("nodes_hq_mcl.tsv"), sep = "\t")
+```
+
+
+
+
+```{r}
+# randomly select 1000 edges with their nodes to create a subgraph1000
+set.seed(123)
+df_edges_sub <- df_edges %>% 
+  dplyr::filter(source %in% df_edges_sel$source | target %in% df_edges_sel$target) %>% 
+  dplyr::distinct()
+df_nodes_sub <- df_nodes %>%
+  dplyr::filter(id %in% c(df_edges_sub$source, df_edges_sub$target)) %>% 
+  dplyr::distinct()
+
+# save edges and nodes to csv file
+fwrite(df_edges_sub, path_target("edges.csv"), row.names = FALSE)
+fwrite(df_nodes_sub, path_target("nodes.csv"), row.names = FALSE)
+
+graph_obj_sub <- tbl_graph(nodes = df_nodes_sub, edges = df_edges_sub, directed = FALSE)
+# plot the subgraph
+ggraph(graph_obj_sub, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = weight), show.legend = FALSE) +
+  geom_node_point(aes(color = group), size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE, size = 3) +
+  theme_graph() +
+  labs(title = "Subgraph of selected nodes and edges")
+```
+
+
+```{r}
+all_node_ids <- graph_obj %>% activate(nodes) %>% as.data.frame()
+selected_nodes_ids <- df_ctganno %>% 
+  dplyr::select(c("vOTU_id", paste0("host_", host_species))) %>% 
+  dplyr::group_by(vOTU_id) %>%
+  dplyr::summarise(across(starts_with("host_"), ~ sum(.x > 0, na.rm = TRUE))) %>%
+  # set value to 1 if > 0, otherwise 0
+  dplyr::mutate(across(starts_with("host_"), ~ ifelse(.x > 0, 1, 0))) %>% 
+  dplyr::mutate(host_sum = rowSums(dplyr::select(., starts_with("host_")))) %>% 
+  dplyr::filter(host_sum >= 5) %>% 
+  dplyr::left_join(df_ctganno[, c("vOTU_id", "contig_repid", "vc_novel_genus")], by = "vOTU_id") %>% 
+  dplyr::select(c("contig_repid", "vOTU_id")) %>% 
+  dplyr::distinct() %>% 
+  dplyr::inner_join(df_nodes, by = c("contig_repid" = "GenomeName")) %>% 
+  pull(id) %>% 
+  head(3)
+  # dplyr::filter(vc_novel_genus == TRUE)
+
+all_node_ids <- graph_obj %>% activate(nodes) %>% pull(id)
+selected_node_indices <- intersect(selected_nodes_ids, all_node_ids) # 只保留图中存在的 ID (Keep only IDs present in the graph)
+```
+
+```{r}
+# 获取所选节点的 igraph 内部索引 (Get internal igraph indices for selected nodes)
+# 注意：tidygraph 节点顺序可能与原始 nodes_df 不同，使用 V(graph_obj)$id 获取当前顺序
+# 使用 igraph::ego() 获取所选节点及其一阶邻居的索引
+# (Use igraph::ego() to get indices of selected nodes and their 1st degree neighbors)
+# 'order = 1' 表示距离为 1 (包括节点自身) ('order = 1' means distance 1, including the node itself)
+# 'mindist = 0' 包含节点自身 ('mindist = 0' includes the node itself)
+neighbor_indices_list <- igraph::ego(graph_obj, order = 1, nodes = selected_node_indices, mindist = 0)
+
+# 合并所有相关节点的索引并去重 (Combine all relevant node indices and remove duplicates)
+all_relevant_indices <- unique(unlist(neighbor_indices_list))[1:10]
+
+# 使用 igraph::induced_subgraph() 提取子图
+# (Use igraph::induced_subgraph() to extract the subgraph)
+# 这个函数会提取这些节点以及它们之间的所有边
+# (This function extracts these nodes and all edges between them)
+subgraph_obj <- igraph::induced_subgraph(graph_obj, vids = all_relevant_indices)
+
+# 将结果转换回 tidygraph 对象 (可选，如果想继续用 tidygraph 操作)
+# (Convert result back to tidygraph object (optional, if you want to continue using tidygraph))
+subgraph_tidy <- as_tbl_graph(subgraph_obj)
+
+print("提取的子图 (包含所选节点及其一阶邻居): (Extracted subgraph (including selected nodes and 1st degree neighbors)):")
+print(subgraph_tidy)
+
+# --- 6. 子网络可视化探索 ---
+# --- 6. Subnetwork Visualization Exploration ---
+print("正在生成子图可视化 (使用 'fr' 布局)... (Generating subgraph visualization (using 'fr' layout)...)")
+
+# 定义布局列表供尝试 (Define a list of layouts to try)
+layout_name <- 'fr' # Fruchterman-Reingold, Kamada-Kawai, Stress, Graphopt, Large Graph Layout
+
+node_color_attr <- "realm (prediction)" # 示例着色列 (Example color attribute)
+node_shape_attr <- "Reference"        # 示例形状列 (Example shape attribute)
+
+# 检查属性是否存在 (Check if attributes exist)
+subgraph_nodes_df <- subgraph_tidy %>% activate(nodes) %>% as_tibble()
+has_color_attr <- node_color_attr %in% names(subgraph_nodes_df)
+has_shape_attr <- node_shape_attr %in% names(subgraph_nodes_df)
+
+ggraph(subgraph_tidy, layout = layout_name) +
+  geom_edge_link() +
+  geom_node_point()
+  # geom_edge_link(color = "grey",
+  #                show.legend = FALSE)
+
+# 添加节点层，根据属性是否存在来映射美学
+# (Add node layer, mapping aesthetics based on attribute existence)
+# if (has_color_attr && has_shape_attr) {
+#   p <- p + geom_node_point(aes(color = !!sym(node_color_attr),
+#                                shape = !!sym(node_shape_attr)), size = 3) +
+#            scale_shape_manual(values=c("TRUE"=17, "FALSE"=16)) # 三角形 vs 圆形 (Triangle vs Circle)
+# } else if (has_color_attr) {
+#   p <- p + geom_node_point(aes(color = !!sym(node_color_attr)), size = 3)
+# } else if (has_shape_attr) {
+#    p <- p + geom_node_point(aes(shape = !!sym(node_shape_attr)), size = 3) +
+#             scale_shape_manual(values=c("TRUE"=17, "FALSE"=16))
+# } else {
+#    p <- p + geom_node_point(size = 3, color = "steelblue") # 默认样式 (Default style)
+# }
+
+# 添加可选的节点标签 (Add optional node labels)
+# p <- p + geom_node_text(aes(label = name), repel = TRUE, size = 2) # 假设 'name' 列存在 (Assuming 'name' column exists)
+
+
+# 打印图形 (Print the plot)
+# 在 RStudio 等环境中会显示图形 (Plot will be displayed in environments like RStudio)
+ggsave(path_target("subgraph.png")) # 保存图形 (Save the plot)"))
+
+# 如果需要保存图形到文件 (If you need to save the plot to a file)
+# ggsave(paste0("subgraph_layout_", layout_name, ".png"), plot = p, width = 10, height = 8, dpi = 300)
+
+```
+
+
+

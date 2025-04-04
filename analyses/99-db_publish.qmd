@@ -1,10 +1,10 @@
 ---
-title: "92-tmp"
+title: "99-db_publish"
 title-block-banner: true
 author:
   - name: Jinlong Ru
     orcid: 0000-0002-6757-6018
-date: 2025-04-04
+date: 2025-06-13
 toc: true
 toc-depth: 4
 number-sections: true
@@ -19,7 +19,7 @@ format:
 reference-location: section
 citation-location: document
 params:
-  name: "92-tmp"
+  name: "99-db_publish"
 ---
 
 **Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
@@ -34,8 +34,8 @@ wd <- "analyses"
 if (basename(getwd()) != wd) {
   setwd(here::here(wd))
 }
-params <- list(name = "92-tmp")
-here::i_am(paste0(params$name, ".qmd"), uuid = "5ff053eb-aaf4-4703-a440-5f162849cb5b")
+params <- list(name = "99-db_publish")
+here::i_am(paste0(params$name, ".qmd"), uuid = "f7eb37c4-e3a5-4205-ba28-752c704d8ffe")
 projthis::proj_create_dir_target(params$name, clean = FALSE)
 path_target <- projthis::proj_path_target(params$name)
 path_source <- projthis::proj_path_source(params$name)
@@ -49,6 +49,7 @@ dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
 
 ```{r packages}
 #| message: false
+#| warning: false
 suppressPackageStartupMessages({
   library(here)
   library(conflicted)
@@ -57,12 +58,18 @@ suppressPackageStartupMessages({
   devtools::load_all()
 })
 
-# con <- load_db()
+con <- load_db()
+con_publish <- DBI::dbConnect(RSQLite::SQLite(), here("AvianViromeDB.sqlite"))
 ```
 
 ## Tasks
 
 The first task is ...
+
+```{zsh}
+seqkit --version
+```
+
 
 ## Files written
 

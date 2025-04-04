@@ -1,0 +1,507 @@
+---
+title: "55-fig5"
+title-block-banner: true
+author:
+  - name: Xueqin Yang
+date: 2025-04-28
+toc: true
+toc-depth: 4
+number-sections: true
+code-fold: true
+code-line-numbers: true
+code-tools: true
+format: 
+  html:
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: full
+reference-location: section
+citation-location: document
+params:
+  name: "55-fig5"
+---
+
+**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
+
+The purpose of this document is ...
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "55-fig5")
+here::i_am(paste0(params$name, ".qmd"), uuid = "bd4cf5d1-c61b-4d34-8ea7-1992925b7f16")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+#| warning: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  library(data.table)
+  library(svglite)
+  library(ggExtra)
+  library(RColorBrewer)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+## Tasks
+
+The first task is ...
+
+```{r load data}
+df_metadata_filter <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+
+df_contig <- df_metadata_filter %>%
+  dplyr::filter(checkv_completeness > 90) %>%
+  dplyr::mutate(contig_id = contig_repid)
+
+
+df_metadata_host <- dbReadTable(con, "host_filtered") %>% 
+   tidyr::separate(Host.taxonomy,
+           into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"),
+           sep = ";",
+           fill =  "right")%>%
+  dplyr::mutate(across(everything(), ~ ifelse(is.na(.), "Unknown", .))) %>% 
+  dplyr::mutate(across(Domain:Species, ~ str_replace(., "^[a-z]__", ""))) 
+```
+
+
+```{r fig5A}
+#Figure 5A
+df_phylum <- df_metadata_host[,c("contig_id","Phylum")] %>% 
+  dplyr::distinct()
+
+
+rp <- df_contig %>% 
+  dplyr::select(c("contig_id","vOTU_id","contig_length")) %>%
+  dplyr::left_join(df_phylum, by = "contig_id") %>%
+  dplyr::mutate(Phylum = ifelse(is.na(Phylum), "Host unknown", Phylum)) %>%
+  dplyr::distinct()
+
+
+summary_stats <- rp %>%
+  group_by(Phylum) %>% 
+  summarise(
+    median_length = median(contig_length, na.rm = TRUE),
+    trimmed_mean  = mean(contig_length, trim = 0.1, na.rm = TRUE),
+    max_length      = max(contig_length, na.rm = TRUE),
+    min_length      = min(contig_length, na.rm = TRUE)
+  ) %>%
+  arrange(desc(median_length))  
+
+
+gc_content <- read.table(here(path_data, "gc.tsv"), header=F, sep="\t") %>%
+  data.table::setnames(colnames(.), c("contig_id", "GC_content")) %>%
+  dplyr::right_join(rp, by = "contig_id")
+
+gc_Phylum_abundance <- gc_content %>%
+  dplyr::group_by(Phylum) %>%
+  dplyr::summarise(Abundance = n())
+
+gc_content <- gc_content %>%
+  dplyr::mutate(Phylum = ifelse(
+    Phylum %in% c("Host unknown", "Bacillota_A", "Bacteroidota","Bacillota", 
+                  "Pseudomonadota", "Actinomycetota"),
+    Phylum,
+    "Other phylum"
+  ))
+
+custom_colors <- c("Host unknown" = "#C9C8C7",   
+                   "Bacillota_A" = "#F886A8", 
+                   "Bacillota" = "#778ccc",
+                   "Bacteroidota" = "#c79cc8",  
+                   "Pseudomonadota" = "#a3def4",
+                   "Actinomycetota" = "#b0d992",
+                   "Other phylum" = "#fed6ad")
+
+gc_content$Phylum <- factor(
+  gc_content$Phylum,
+  levels = c("Bacillota_A", "Bacteroidota", "Bacillota","Pseudomonadota", "Actinomycetota","Other phylum","Host unknown")  # 自定义顺序
+)
+
+p_main <- ggplot(gc_content, aes(x = contig_length, y = GC_content, color = Phylum)) +
+  geom_point(alpha = 1, size =2.5 ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(color = "black", size = 22),
+    axis.text.y = element_text(color = "black", size = 22), 
+    axis.title.x = element_text(color = "black", size = 22),
+    axis.title.y = element_text(color = "black", size = 22), 
+    axis.line = element_line(color = "black", linewidth = 0.5), 
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5), 
+    panel.grid = element_blank(), 
+    legend.text = element_text(size = 15), 
+    legend.position = "right",
+    legend.justification = "left",
+    legend.box.margin = margin(t = -260, l = -130, b = 5, r = 5), )+ 
+  scale_color_manual(values = custom_colors) +
+  scale_x_log10() +
+  scale_y_continuous(labels = function(x) paste0(x, "%"),) +
+  labs(x = "Genome size (Log10)", y = "GC content", color = "") 
+
+p_with_marginals <- ggMarginal(p_main, type = "densigram",groupColour = TRUE, groupFill = TRUE, alpha = 0.7)
+
+
+ggsave(path_target("Figure5A_GC_vOTUs_90.svg"), p_with_marginals, width = 9.5, height = 7)
+```
+
+
+```{r fig5B}
+#Figure5B
+ph_counts <- rp %>%
+  dplyr::group_by(Phylum) %>%
+  dplyr::summarise(votuCount = n()) %>%
+  dplyr::arrange(votuCount) %>%
+  dplyr::mutate(Phylum = ifelse(votuCount < 100, "Other phylum", Phylum)) %>%
+  dplyr::group_by(Phylum) %>%
+  dplyr::summarise(votuCount = sum(votuCount)) %>%
+  dplyr::ungroup() %>%
+  dplyr::distinct() %>%
+  dplyr::arrange(votuCount) %>%
+  dplyr::mutate(Phylum = factor(Phylum, levels = c("Other phylum",setdiff(Phylum,"Other phylum"))))
+
+set3_colors <- RColorBrewer::brewer.pal(n = 10, name = "Set3")
+set3_colors[c(9, 10)] <- set3_colors[c(10, 9)] 
+
+p5b <- ggplot(ph_counts, aes(x = Phylum, y = votuCount, fill =Phylum)) +
+  geom_bar(stat = "identity",width =0.8) +
+  scale_fill_manual(values = set3_colors) + 
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(color = "black", size = 14),
+    axis.text.y = element_text(color = "black", size = 14), 
+    axis.title.x = element_text(color = "black", size = 16),
+    axis.title.y = element_text(color = "black", size = 16), 
+    axis.line.x = element_line(color = "black", linewidth = 0.5),
+    axis.line.y = element_line(color = "black",linewidth = 0.5), 
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.y = element_line(color = "black", linewidth = 0.5), 
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+  ) +
+  labs(title = "", 
+       x = "",
+       y = "Number of vOTUs") +
+  coord_flip() +
+  theme(legend.position = "none")
+
+ggsave(path_target("Figure5B_host_Phylum_votus.svg"), plot = p5b, width = 5, height =4)
+```
+
+
+```{r fig5C}
+#Figure5C
+df_genus <- df_metadata_host[,c("contig_id","Genus")] %>%
+  dplyr::distinct()
+
+plot_data <- df_contig[, c("contig_id","vOTU_id")] %>%
+  dplyr::left_join(df_genus, by = "contig_id") %>%
+  dplyr::mutate(Genus = ifelse(is.na(Genus), "Host unknown", Genus)) %>%
+  dplyr::distinct() %>%
+  dplyr::filter(Genus != "Host unknown")%>%
+  dplyr::group_by(vOTU_id) %>%
+  dplyr::mutate(count = n()) %>%
+  dplyr::mutate(Category = ifelse(count == 1, "Specialist", "Generalist")) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(vOTU_id, Category) %>%
+  dplyr::summarise(Genus_count = n(), .groups = "drop") %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(Genus_count, Category) %>%
+  dplyr::summarise(votu_count = n(), .groups = "drop") 
+
+p5c <- ggplot(plot_data, aes(x = Genus_count, y = votu_count, fill =Category)) +
+  geom_bar(stat = "identity",width =0.9) +
+  scale_y_continuous(expand = c(0.05,0.8))+
+  scale_x_continuous(expand = c(0,0.3))+
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(color = "black", size = 16),
+    axis.text.y = element_text(color = "black", size = 16), 
+    axis.title.x = element_text(color = "black", size = 17),
+    axis.title.y = element_text(color = "black", size = 17),
+    axis.line.x = element_line(color = "black", linewidth = 0.5), 
+    axis.line.y = element_line(color = "black",linewidth = 0.5), 
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.y = element_line(color = "black", linewidth = 0.5),
+    legend.text = element_text(color = "black", size = 17),
+    legend.title = element_blank(),
+    legend.justification = "left",
+    legend.position = c(0.6, 0.6),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    plot.title = element_text(size = 17, face = "bold", hjust = 0.5)
+  ) +
+  scale_fill_manual(values = c("Specialist" = "#778ccc", "Generalist" = "#B8CF88"))+
+  labs(title = "", 
+       x = "Number of putative hosts (genus)",
+       y = "Number of vOTUs")
+
+ggsave(path_target("Figure5C_Number_hosts_vOTU_90.svg"), plot = p5c, width = 5, height = 4)
+```
+
+
+```{r fig5D1}
+genus <- df_contig[,c("contig_id", "vOTU_id", "contig_length", "class","family","lifestyle")] %>%
+  dplyr::mutate(class = ifelse(grepl("\\[|\\]", class), "Uclassified_C", class)) %>%
+  dplyr::mutate(family = ifelse(grepl("\\[|\\]", family), "Uclassified_F", family)) %>%
+  dplyr::mutate(class = ifelse(is.na(class),"Uclassified_C",class)) %>%
+  dplyr::mutate(family = ifelse(is.na(family),"Uclassified_F",family)) %>%
+  dplyr::left_join(df_metadata_host[,c("contig_id","Genus","Phylum")], by = "contig_id") %>%
+  dplyr::mutate(Genus = ifelse(Genus == "" | is.na(Genus), "Host unknown", Genus)) %>%
+  dplyr::mutate(Phylum = ifelse(Phylum == "" | is.na(Phylum), "Host unknown", Phylum)) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(Genus) %>%
+  dplyr::mutate(Abundance_genus = n())
+
+genus_abu <- genus %>% 
+  dplyr::filter((Abundance_genus >= 60 | Genus == "Host unknown") & Genus != "51-20")
+
+genus_abu1 <- genus_abu %>% 
+  dplyr::select(c("Genus","Phylum","Abundance_genus")) %>%
+  dplyr::distinct() %>%
+  dplyr::filter(Genus!= "Host unknown")  # TODO: double check number of "Host unknown"
+
+custom_colors <- c("Host unknown" = "#696969",   
+                   "Bacillota_A" = "#778ccc",  
+                   "Bacteroidota" = "#f17172",  
+                   "Pseudomonadota" = "#adc299",
+                   "Actinomycetota" = "#edd7d7",
+                   "Bacillota_C" = "#c7e1a6",
+                   "Desulfobacterota" = "#fed6ad",
+                   "Bacillota" = "#c79cc8",
+                   "Thermoplasmatota" = "orange")
+
+
+p5d1 <- ggplot(genus_abu1, aes(x = reorder(Genus, Abundance_genus), y = Abundance_genus, fill = Phylum)) +
+  geom_bar(stat = "identity", width = 0.8) +
+  labs(x = "", y = "# of vOTUs \nfor earch genus") +
+  scale_x_discrete(expand = c(0.02,0)) +
+  theme_bw() +
+  theme(
+    panel.border = element_rect(color = "black",linewidth = 0.5),
+    axis.text.x = element_text(color = "black", size = 16, ),
+    axis.text.y = element_text(color = "black", size = 16,),
+    axis.title.x = element_text(color = "black", size = 15,hjust = 0.5),
+    axis.title.y = element_text(color = "black", size = 16,), 
+    axis.line.x = element_line(color = "black", linewidth = 0.5),  
+    axis.line.y = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.y = element_line(color = "black", linewidth = 0.5), 
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(), 
+    legend.title = element_blank(),
+    legend.text = element_text(color = "black", size = 15,),
+    #legend.position="none",
+    legend.justification = "left",
+    legend.box.margin = margin(t = 5, l = 10, b = 5, r = 5),
+    plot.title = element_text(size = 16, face = "", hjust = 0.5)
+  ) +
+  guides(fill = guide_legend(nrow = 3, ncol = 4)) + 
+  scale_fill_manual(values = custom_colors,breaks=c("Bacteroidota","Bacillota","Bacillota_A","Pseudomonadota","Actinomycetota","Bacillota_C",
+                                                    "Desulfobacterota","Thermoplasmatota")) +
+  coord_flip()
+
+ggsave(path_target("Figure5D1_host_vOTU_90.svg"), p5d1, width = 12, height = 12)
+```
+
+
+```{r fig5D2}
+genus_abu2 <- genus_abu[,c("Genus","Phylum","contig_length","Abundance_genus")] %>%
+  dplyr::distinct()
+
+p5d2 <- ggplot(genus_abu2, aes(x = reorder(Genus, Abundance_genus), y = contig_length, fill = Phylum, color = Phylum)) +
+  geom_boxplot(alpha = 0.7,outlier.shape = NA, size = 1) +
+  labs(x = "", y = "Genome size\n") +
+  scale_y_continuous(breaks = c(100000, 300000),limit = c(4000,400000), expand = c(0.02,0)) + 
+  scale_x_discrete(expand = c(0.02,0)) + 
+  theme_bw() +
+  geom_point(aes(color = Phylum), size = 0.8 ) +
+  theme(
+    panel.border = element_rect(color = "black",linewidth = 0.5),
+    axis.text.x = element_text(color = "black", size = 16, ),
+    axis.text.y = element_text(color = "black", size = 16, ), 
+    axis.title.x = element_text(color = "black", size = 15,hjust = 0.5),
+    axis.title.y = element_text(color = "black", size = 16,), 
+    axis.line.x = element_line(color = "black", linewidth = 0.5), 
+    axis.line.y = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.y = element_blank(), 
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),  
+    legend.title = element_blank(),
+    legend.position="none",
+    plot.title = element_text(size = 16, face = "", hjust = 0.5)
+  ) +
+  guides(fill = guide_legend(nrow = 3, ncol = 2)) + 
+  scale_fill_manual(values = custom_colors,breaks=c("Bacteroidota","Bacillota","Bacillota_A","Pseudomonadota","Actinomycetota","Bacillota_C",
+                                                    "Desulfobacterota","Thermoplasmatota")) +
+  scale_color_manual(values = custom_colors) +
+  theme(axis.text.y = element_blank()) + 
+  coord_flip()
+
+ggsave(path_target("Figure5D2_host_vOTU_size_90.svg"), p5d2, width = 2.5, height = 12)
+```
+
+
+```{r fig5D3}
+genus_class <- genus_abu[,c("Genus","Phylum","class","family","Abundance_genus")] %>%
+  dplyr::group_by(Genus, class) %>%
+  dplyr::summarise(class_Count = n(), 
+            Advance = paste(unique(Abundance_genus), collapse = ", "), 
+            .groups = 'drop') %>% 
+  dplyr::ungroup() %>%
+  dplyr::group_by(Genus) %>%
+  dplyr::mutate(Percentage = class_Count / sum(class_Count) * 100) %>%  
+  dplyr::ungroup() %>%
+  dplyr::mutate(Advance = as.numeric(Advance))
+
+p5d3 <- ggplot(genus_class, aes(x = reorder(Genus, Advance), y = Percentage, fill = class)) +
+  geom_bar(stat = "identity",width = 0.8) +
+  scale_y_continuous(expand = c(0.02,0.8),
+                     labels = function(x) paste0(x, "%"),  # 
+                     breaks = c (0, max(genus_class$Percentage))) +
+  scale_x_discrete(expand = c(0.02,0)) + 
+  labs(x = "", y = "Taxonomy\n   ", fill = "") +
+  theme_bw() +
+  theme(
+    panel.border = element_rect(color = "black"),
+    axis.text.x = element_text(color = "black", size = 22,margin = margin(r = 100)),
+    axis.text.y = element_text(color = "black", size = 22,margin = margin(l = -100)), 
+    axis.title.x = element_text(color = "black", size = 22),
+    axis.title.y = element_text(color = "black", size = 22), 
+    axis.line = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.y =  element_blank(),
+    panel.grid = element_blank(),
+    legend.text = element_text(size = 20), 
+    plot.margin = unit(c(0.3, 0.7, 0, 0), "cm") ,
+    legend.position = "none",
+    plot.title = element_text(size = 22, face = "", hjust = 0.5)
+  ) +
+  guides(fill = guide_legend(nrow = 5, ncol = 1)) + 
+  theme(axis.text.y = element_blank()) + 
+  coord_flip()
+  # scale_fill_manual(values = c("#DEA6D5", "#9BACD8","#f17172","#b0d992","#4157A2"))
+
+ggsave(path_target("Figure5D3_host_vOTU_class_90.svg"), p5d3, width = 3, height = 12)
+```
+
+
+```{r fig5D4}
+genus_lifestyle <- genus_abu[,c("Genus","Phylum","lifestyle","Abundance_genus")] %>%
+  dplyr::group_by(Genus, lifestyle) %>%
+  dplyr::summarise(lifestyle_Count = n(), 
+            Advance = paste(unique(Abundance_genus), collapse = ", "), 
+            .groups = 'drop') %>% 
+  dplyr::group_by(Genus) %>%
+  dplyr::mutate(Percentage =lifestyle_Count / sum(lifestyle_Count) * 100) %>% 
+  dplyr::ungroup() %>%
+  dplyr::mutate(Advance = as.numeric(Advance))
+
+p5d4 <- ggplot(genus_lifestyle, aes(x = reorder(Genus, Advance), y = Percentage, fill = lifestyle)) +
+  geom_bar(stat = "identity",width = 0.8) +
+  scale_y_continuous(expand = c(0.02,0.8),
+                     labels = function(x) paste0(x, "%"), 
+                     breaks = c (0, 100)) +
+  scale_x_discrete(expand = c(0.02,0)) +
+  labs(x = "", y = "Lifestyle\n   ", fill = "") +
+  theme_bw() +
+  theme(
+    panel.border = element_rect(color = "black"),
+    axis.text.x = element_text(color = "black", size = 22,margin = margin(r = 100)),
+    axis.text.y = element_text(color = "black", size = 22,margin = margin(l = -100)),
+    axis.title.x = element_text(color = "black", size = 22),
+    axis.title.y = element_text(color = "black", size = 22), 
+    axis.line = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5), 
+    axis.ticks.y =  element_blank(),
+    panel.grid = element_blank(), 
+    legend.text = element_text(size = 20), 
+    plot.margin = unit(c(0.3, 0.7, 0, 0), "cm") , 
+    legend.position = "bottom",
+    plot.title = element_text(size = 22, face = "", hjust = 0.5)
+  ) +
+  
+  guides(fill = guide_legend(nrow = 3, ncol = 1)) + 
+  theme(axis.text.y = element_blank()) + 
+  coord_flip() +
+  scale_fill_manual(values = c("#84B977", "#D6E9C3"),labels = c("temperate"= "Temperate", "virulent" = "Virulent"))  # 自定义颜色
+
+ggsave(path_target("Figure5D4_host_vOTU_lifestyle_90.svg"), p5d4, width = 2.8, height = 12)
+```
+
+
+```{r fig5D5}
+genus_Category <- genus_abu %>%
+  dplyr::group_by(contig_id) %>%
+  dplyr::mutate(contig_count = n()) %>%
+  dplyr::mutate(Category = if_else(contig_count == 1, "specialist", "generalist")) %>%
+  dplyr::group_by(Genus, Category) %>%
+  dplyr::summarise(Category_Count = n(), 
+            Advance = paste(unique(Abundance_genus), collapse = ", "),
+            .groups = 'drop') %>%  
+  dplyr::group_by(Genus) %>%
+  dplyr::mutate(Percentage =Category_Count / sum(Category_Count) * 100) %>%  
+  dplyr::ungroup() %>%
+  dplyr::mutate(Advance = as.numeric(Advance))
+
+p5d5 <- ggplot(genus_Category, aes(x = reorder(Genus, Advance), y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity",width = 0.8) +
+  scale_y_continuous(expand = c(0.02,0.8),
+                     labels = function(x) paste0(x, "%"),  
+                     breaks = c (0, 100)) +
+  scale_x_discrete(expand = c(0.02,0)) + # 
+  labs(x = "", y = "Specialist/\ngeneralist ", fill = "") +
+  theme_bw() +
+  theme(
+    panel.border = element_rect(color = "black"),
+    axis.text.x = element_text(color = "black", size = 22,margin = margin(r = 100)),
+    axis.text.y = element_text(color = "black", size = 22,margin = margin(l = -100)),
+    axis.title.x = element_text(color = "black", size = 22),
+    axis.title.y = element_text(color = "black", size = 22), 
+    axis.line = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),  
+    axis.ticks.y =  element_blank(),
+    panel.grid = element_blank(), 
+    legend.text = element_text(size = 20), 
+    plot.margin = unit(c(0.3, 0.7, 0, 0), "cm") , 
+    legend.position = "bottom",
+    plot.title = element_text(size = 22, face = "", hjust = 0.5)
+  ) +
+  
+  guides(fill = guide_legend(nrow = 3, ncol = 1)) + 
+  theme(axis.text.y = element_blank()) +
+  coord_flip() +
+  scale_fill_manual(values = c("#EF8E87", "#FBEEDD"), labels = c("specialist"= "Specialist", "generalist" = "Generalist"))  # 自定义颜色
+
+ggsave(path_target("Figure5D5_host_vOTU_Category_90.svg"), p5d5, width = 2.8, height = 12)
+```
+
+
+## Files written
+
+These files have been written to the target directory, `r paste0("data/", params$name)`:
+
+```{r list-files-target}
+projthis::proj_dir_info(path_target(), tz = "CET")
+```

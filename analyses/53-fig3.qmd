@@ -1,0 +1,431 @@
+---
+title: "53-fig3"
+title-block-banner: true
+author:
+  - name: Xueqin Yang
+date: 2025-04-28
+toc: true
+toc-depth: 4
+number-sections: true
+code-fold: true
+code-line-numbers: true
+code-tools: true
+format: 
+  html:
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: full
+reference-location: section
+citation-location: document
+params:
+  name: "53-fig3"
+---
+
+**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
+
+The purpose of this document is ...
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "53-fig3")
+here::i_am(paste0(params$name, ".qmd"), uuid = "486a8866-050b-45f4-8b10-e7eb60da2bb2")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+#| warning: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  library(data.table)
+  library(UpSetR)
+  library(svglite)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+## Tasks
+
+The first task is ...
+
+```{r}
+df_contig_annotation <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+df_metadata <- dbReadTable(con, "contig_annotation")
+df_metadata_filter <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+
+# Load sample metadata and standardize host categories
+df_sample_metadata <- dbReadTable(con, "sample_metadata") %>% 
+  # Standardize bird categories 
+  dplyr::mutate(sample_host = dplyr::case_when(
+    sample_host == "Grus" ~ "Migratory birds",
+    sample_host == "Bird" ~ "Migratory birds",
+    TRUE ~ sample_host
+  ))
+```
+
+
+```{r fig3A}
+votu_number <- df_sample_metadata %>%
+  dplyr::select(c("sample_host","study_id")) %>%
+  dplyr::distinct() %>%
+  dplyr::right_join(df_metadata[, c("study_id", "contig_id", "vOTU_id")], by = "study_id") %>%
+  dplyr::select(c("vOTU_id", "sample_host")) %>%
+  dplyr::right_join(df_metadata_filter[, c("vOTU_id", "contig_length")], by = "vOTU_id") %>%
+  dplyr::distinct() %>%
+  dplyr::select(c("vOTU_id", "sample_host")) %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(sample_host = ifelse(sample_host %in% c("Grus", "Pigeon","Egret", "Migratory birds", "Coturnix"), "Other birds", sample_host))
+```
+
+
+
+```{r fig3A}
+# Create a clean, professional UpSet plot from vOTU host data
+# Transform vOTU data into list format suitable for UpSetR
+host_votu_sets <- votu_number %>%
+  # First, ensure we have clean, unique vOTU-host pairs
+  # distinct(sample_host, vOTU_id) %>%
+  # Simplify host categories if needed
+  mutate(
+    # Consolidate less common bird types into "Other birds" category
+    sample_host = case_when(
+      sample_host %in% c("Chicken", "Duck", "Goose") ~ sample_host,
+      TRUE ~ "Other birds"
+    )
+  ) %>%
+  # Group by host and create a list of vOTUs for each
+  group_by(sample_host) %>%
+  summarise(vOTUs = list(vOTU_id), .groups = "drop") %>%
+  # Convert to a named list structure for UpSetR
+  {setNames(
+    object = purrr::map(.$vOTUs, ~as.character(.x)),
+    nm = .$sample_host
+  )}
+
+# Create the UpSet plot with professional styling
+p3a <- UpSetR::upset(
+  # Input data
+  fromList(host_votu_sets),
+  # Set ordering and selection
+  nsets = length(host_votu_sets),
+  sets = names(host_votu_sets),
+  order.by = "freq",
+  
+  # Visual parameters
+  point.size = 5,
+  line.size = 2,
+  number.angles = 0,
+  mb.ratio = c(0.7, 0.3),
+  
+  # Colors
+  main.bar.color = '#00315A',
+  matrix.color = "#5b7896FF",
+  sets.bar.color = '#DE6B66',
+  shade.color = "#F0BD7E",
+  
+  # Labels
+  mainbar.y.label = "Number of vOTUs",
+  sets.x.label = "Number of vOTUs",
+  
+  # Text scaling
+  text.scale = c(4, 3.7, 3, 2, 3.5, 3.5)
+)
+
+# For SVG output
+svglite(path_target("Figure3A_votu_upset.svg"), width = 16, height = 14)
+print(p3a)
+dev.off()
+```
+
+
+```{r fig3B}
+##Figure3B
+# Read a table into an R data frame
+df_metadata <- dbReadTable(con, "contig_annotation")
+df_metadata_filter <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+
+df_sample <- dbReadTable(con, "sample_metadata")
+df_sample <- df_sample[,c("sample_host","study_id")]
+df_sample <- distinct(df_sample)
+vc_study <- df_metadata[,c("study_id","contig_id","vOTU_id","vc_id")]
+bt <- left_join(vc_study, df_sample, by = "study_id")
+bt <- bt[,c("vc_id","sample_host")]
+bt <- distinct(bt)
+vc_study_filter <- data.frame(df_metadata_filter[,c("vc_id")])
+vc_study_filter <- distinct(vc_study_filter)
+colnames(vc_study_filter) <- "vc_id"
+vc_study_filter <- left_join(vc_study_filter,bt, by = "vc_id")
+vc_number <- distinct(vc_study_filter)
+
+con_vc <- vc_number %>%
+  group_by(vc_id) %>%
+  filter(n() == 4) %>%
+  ungroup()
+con_vc <- data.frame(con_vc[,c("vc_id")])
+con_vc <- distinct(con_vc)
+
+vc_number <- vc_number %>%
+  mutate(sample_host = ifelse(sample_host %in% c("Grus", "Pigeon","Egret", "Migratory birds", "Coturnix"), "Other birds", sample_host))
+bt <- vc_number %>%
+  group_by(sample_host) %>%
+  summarise(n=n())
+
+pt_wide <- vc_number %>%
+  group_by(sample_host) %>% 
+  summarise(vc_combined = paste(vc_id, collapse = ", "), .groups = "drop") %>%
+  pivot_wider(names_from = sample_host, values_from = vc_combined)
+
+expanded_columns <- lapply(pt_wide, function(col) {
+  if (is.character(col)) {
+    return(tidyr::unnest(tibble(value = strsplit(col, ",\\s*")), cols = value))
+  } else {
+    return(tibble(value = col))
+  }
+})
+
+max_length <- max(sapply(expanded_columns, nrow))
+
+expanded_columns_filled <- lapply(expanded_columns, function(col) {
+  col <- unlist(col)  
+  length(col) <- max_length  
+  col  
+})
+
+
+expanded_data <- as.data.frame(do.call(cbind, expanded_columns_filled))
+p3b <- UpSetR::upset(fromList(expanded_data),      
+           nsets=length(expanded_data),
+           sets=c("Chicken","Duck","Goose","Other birds"), 
+           number.angles = 0,
+           point.size=5,
+           line.size=2,
+           mainbar.y.label="Number of VCs",
+           main.bar.color = '#00315A',
+           matrix.color="#5b7896FF", 
+           sets.x.label="Number of VCs",
+           sets.bar.color='#DE6B66',
+           mb.ratio = c(0.7, 0.3), 
+           order.by = "freq", 
+           text.scale=c(4,3.7,3,2,3.5,3.5), 
+           shade.color="#F0BD7E",
+)
+
+svglite(path_target("Figure3B_VC_upset.svg"), width = 16, height = 14)
+print(p3b)
+dev.off()
+```
+
+
+```{r fig3C}
+# Read a table into an R data frame
+df_metadata <- dbReadTable(con, "contig_annotation")
+df_metadata_filter <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+df_sample <- dbReadTable(con, "sample_metadata")
+df_sample <- df_sample[,c("sample_host","study_id")]
+df_sample <- distinct(df_sample)
+vc_study <- df_metadata[,c("study_id","contig_id","vOTU_id","vc_id")]
+bt <- left_join(vc_study, df_sample, by = "study_id")
+bt <- bt[,c("vOTU_id","sample_host")]
+bt <- distinct(bt)
+vc_study_filter <- df_metadata_filter[,c("vc_id","vOTU_id","contig_length")]
+vc_study_filter <- distinct(vc_study_filter)
+vc_study_filter <- left_join(vc_study_filter,bt, by = "vOTU_id")
+vc <- distinct(vc_study_filter)
+vc <- vc %>%
+  mutate(sample_host = ifelse(sample_host %in% c("Grus", "Pigeon","Egret", "Migratory birds", "Coturnix"), "Other birds", sample_host))
+
+vc_1 <- vc %>%
+  group_by(vc_id) %>%
+  summarise(vc_size = n_distinct(vOTU_id)) %>%
+  arrange(desc(vc_size))
+vc <- vc %>%
+  left_join(vc_1, by = "vc_id")
+
+#vcs size
+vc_size <- vc[,c("vc_id","vc_size")]
+vc_size <- distinct(vc_size)
+top10 <- vc_size[order(vc_size$vc_size, decreasing = TRUE), ][1:10, ]
+
+colors <- c("VC75174" = "#80B1D3", "VC74815" = "#F1B8A3", "VC75351"="#FBB463",
+            "VC75181" = "#8DD3C7", "VC75889" = "#F17172","VC76511"="#B8CF88",
+            "VC71872"="#778ccc","VC72233" = "#BC80BD", "VC75307"= "#B3DE69","VC58568"= "#BEBADA")
+
+p3c1 <- ggplot(top10, aes(x = reorder(vc_id, vc_size), y = vc_size, fill = vc_id)) +
+  geom_bar(stat = "identity", width = 0.8) +
+  labs(x = "", y = "VCs size") +
+  scale_y_continuous(expand = c(0.02,0)) +
+  scale_x_discrete(expand = c(0.02,0.5)) + 
+  theme_bw() +
+  #them
+  theme(
+    panel.border = element_rect(color = "black",linewidth = 0.5),
+    axis.text.x = element_text(color = "black", size = 16, ),
+    axis.text.y = element_text(color = "black", size = 16,), 
+    axis.title.x = element_text(color = "black", size = 20,hjust = 0.5),
+    axis.title.y = element_text(color = "black", size = 20,),
+    axis.line.x = element_line(color = "black", linewidth = 0.5), 
+    axis.line.y = element_line(color = "black", linewidth = 0.5), 
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.y = element_line(color = "black", linewidth = 0.5),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    legend.title = element_blank(),
+    legend.position="none",
+    plot.title = element_text(size = 20, face = "", hjust = 0.5)
+  ) +
+  scale_fill_manual(values = colors) + 
+  coord_flip()
+
+ggsave(path_target("Figure3C1.svg"), p3c1, width = 6, height = 5)
+```
+
+
+```{r fig3C2}
+vc_2 <- vc %>%
+  filter(vc_size >= 50)
+vc_2 <- vc_2[,c("vc_id","vc_size","contig_length")]
+vc_2 <- distinct(vc_2)
+
+p3c2 <- ggplot(vc_2, aes(x = reorder(vc_id, vc_size), y = contig_length, fill = vc_id, color = vc_id)) +
+  geom_boxplot(alpha = 0.8, size = 1.2) +
+  labs(x = "", y = "Genome size") +
+  scale_y_continuous(expand = c(0.02,0.2)) +
+  scale_x_discrete(expand = c(0.02,0.5)) + 
+  theme_bw() +
+  theme(
+    panel.border = element_rect(color = "black",linewidth = 0.5),
+    axis.text.x = element_text(color = "black", size = 16, ),
+    axis.text.y = element_text(color = "black", size = 16,), 
+    axis.title.x = element_text(color = "black", size = 20,hjust = 0.5),
+    axis.title.y = element_text(color = "black", size = 20,), 
+    axis.line.x = element_line(color = "black", linewidth = 0.5), 
+    axis.line.y = element_line(color = "black", linewidth = 0.5), 
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5), 
+    axis.ticks.y = element_blank(),  
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank(), 
+    legend.title = element_blank(),
+    legend.position="none",
+    plot.title = element_text(size = 20, face = "", hjust = 0.5)
+  ) +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) + 
+  theme(axis.text.y = element_blank()) + 
+  coord_flip()
+
+ggsave(path_target("Figure3C2_vc_genomesize.svg"), p3c2, width = 5, height = 5)
+```
+
+
+```{r fig3C3}
+#animal-host
+vc_3 <- vc %>%
+  filter(vc_size >= 50)
+vc_3 <- vc_3[,c("vc_id","vc_size","sample_host")]
+sample <- vc_3 %>%
+  group_by(vc_id, sample_host) %>%
+  summarise(sample_Count = n(), 
+            Advance = paste(unique(vc_size), collapse = ", "),
+            .groups = 'drop') %>% 
+  group_by(vc_id) %>%
+  mutate(Percentage =sample_Count / sum(sample_Count) * 100) %>% 
+  ungroup()
+sample$Advance <- as.numeric(sample$Advance)
+
+p3c3 <- ggplot(sample, aes(x = reorder(vc_id, Advance), y = Percentage, fill = sample_host)) +
+  geom_bar(stat = "identity",width = 0.8) +
+  scale_y_continuous(expand = c(0.02,0.8),
+                     labels = function(x) paste0(x, "%"), 
+                     breaks = c (0, 100)) +
+  scale_x_discrete(expand = c(0.02,0.5)) +
+  labs(x = "", y = "Animal hosts", fill = "Animal hosts") +
+  theme_bw() +
+  theme(
+    panel.border = element_rect(color = "black",linewidth = 0.5),
+    axis.text.x = element_text(color = "black", size = 16, ),
+    axis.text.y = element_text(color = "black", size = 16,), 
+    axis.title.x = element_text(color = "black", size = 20,hjust = 0.5),
+    axis.title.y = element_text(color = "black", size = 20,), 
+    axis.line.x = element_line(color = "black", linewidth = 0.5), 
+    axis.line.y = element_line(color = "black", linewidth = 0.5), 
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5), 
+    axis.ticks.y = element_blank(), 
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(), 
+    legend.title = element_text(color = "black", size = 16,),
+    legend.text = element_text(color = "black", size = 15,),
+    legend.position="right",
+    plot.title = element_text(size = 20, face = "", hjust = 0.5)
+  ) +
+  scale_fill_brewer(palette="Paired") + 
+  theme(axis.text.y = element_blank()) + 
+  coord_flip()
+
+ggsave(path_target("Figure3C3_vc_samplehost.svg"), p3c3, width = 5, height = 5)
+```
+
+
+```{r fig3D}
+##Figure3D
+# Read a table into an R data frame
+df_metadata <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+#=
+data <- df_metadata[,c("vOTU_id","lifestyle")]
+
+lifestyle <- data %>%
+  group_by(lifestyle) %>%
+  summarise(count = n(), .groups = "drop")
+
+colnames(lifestyle) <- c("lifestyle","counts")
+lifestyle$lifestyle <- recode(lifestyle$lifestyle,"virulent" = "Virulent","temperate" = "Temperate")
+lifestyle$lifestyle <- factor(lifestyle$lifestyle,levels = c("Virulent","Temperate"))
+
+p3d <- ggplot(lifestyle, aes(x = lifestyle, fill = lifestyle, y = counts)) +
+  geom_bar(stat = "identity", position = 'stack', 
+           width = 0.6)+  
+  scale_y_continuous(expand = c(0,0)) + 
+  labs(title = "", x = "", y = "Number of vOTUs") +
+  scale_fill_manual(values = c("Virulent" = "#DE6B66", "Temperate" = "#35BDC8"),
+                    drop = F) +
+  theme_minimal()+
+  theme(
+    axis.text.x = element_text(color = "black", size = 17, angle = 0, hjust = 0.5),
+    axis.text.y = element_text(color = "black", size = 17),
+    axis.title.x = element_text(color = "black", size = 18),
+    axis.title.y = element_text(color = "black", size = 18), 
+    axis.line = element_line(color = "black", linewidth = 0.5),
+    axis.ticks = element_line(color = "black", linewidth = 0.5),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    legend.text = element_text(size = 15),
+    legend.title = element_blank())
+
+ggsave(path_target("Figure3D_classified.svg"), plot = p3d,width = 5, height = 4)
+```
+
+
+## Files written
+
+These files have been written to the target directory, `r paste0("data/", params$name)`:
+
+```{r list-files-target}
+projthis::proj_dir_info(path_target(), tz = "CET")
+```

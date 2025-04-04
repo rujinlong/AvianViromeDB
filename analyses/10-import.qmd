@@ -79,7 +79,8 @@ Viral-host pairs should satisfy the following criteria:
 
 ```{r metadata}
 df_metadata <- openxlsx::read.xlsx(here(path_raw, "pc028e3-metadata.xlsx"), sheet = "metadata") %>% 
-  dplyr::select(c("study_id", "project_id", "sample_host", "geo_loc_name"))
+  # dplyr::select(c("study_id", "project_id", "sample_host", "geo_loc_name", "sample_id")) %>%
+  dplyr::distinct()
 ```
 
 ```{r import hpc results}
@@ -91,7 +92,7 @@ df_virsorter2 <- parse_virsorter2(here(path_data, "virsorter2-score.tsv"), here(
 df_checkv <- parse_checkv_quality(here(path_data, "checkv-quality_summary.tsv"))
 df_ctg2vOTU <- parse_aniclst(here(path_data, "map-aniclst.tsv"))
 df_bacphlip <- parse_bacphlip(here(path_data, "bacphlip.tsv.gz"))
-df_vcontact3 <- parse_vcontact3(here(path_data, "vcontact3-final_assignments.csv"))
+df_vcontact3 <- parse_vcontact3(here(path_data, "vcontact3-final_assignments.csv.gz"))
 df_vcontact3_qry <- df_vcontact3 %>%
   dplyr::filter(Reference == FALSE) %>%
   dplyr::select(-c("Reference")) %>%
@@ -108,6 +109,11 @@ df_ctg2asb <- fread(here(path_data, "map-contig2asb.tsv"), header = FALSE) %>%
 ```
 
 ```{r merge all tables}
+df_metadata_host <- df_metadata %>% 
+  dplyr::select(c("study_id", "sample_host")) %>% 
+  dplyr::distinct()
+
+
 df_contig_annotation <- df_ctg2vOTU %>%
   dplyr::left_join(df_ctg2asb, by = "contig_id") %>% 
   dplyr::left_join(df_checkv, by = "contig_id") %>% 
@@ -130,10 +136,14 @@ df_contig_annotation <- df_ctg2vOTU %>%
   # put "contig_id" and "study_id" at the beginning of the data frame
   dplyr::select(c("contig_id", "study_id", everything())) %>%
   # only keep high confidence viral contigs
-  dplyr::filter(genomad_virus_score >= 0.8 & virsorter2_score >= 0.9)
+  dplyr::filter(genomad_virus_score >= 0.8 & virsorter2_score >= 0.9) %>% 
+  # add bird host columns
+  dplyr::left_join(df_metadata_host, by = "study_id") %>% 
+  pivot_wider(names_from = sample_host, values_from = sample_host, values_fn = function(x) 1, values_fill = 0, names_prefix = "host_")
+  
 
 # Viral-host prediction by iPHoP
-df_host <- fread(here(path_data, "iphop-prediction_to_genome.csv")) %>%
+df_host <- fread(here(path_data, "iphop-prediction_to_genome.csv.gz")) %>%
   data.table::setnames(colnames(.), make.names(colnames(.))) %>%
   data.table::setnames("Virus", "contig_id") %>%
   dplyr::filter(Confidence.score >= 90) %>%
@@ -150,6 +160,79 @@ df_asb_empty <- df_contig_annotation %>%
 
 # save df_asb_empty to csv
 fwrite(df_asb_empty, path_target("df_asb_empty.tsv"), sep = "\t")
+```
+
+```{r filter high-quality VCs for downstream analysis}
+# filter by the selected column
+df_contig_annotation_filtered <- df_contig_annotation %>% 
+  # dplyr::filter(checkv_quality_score %in% c(1,2,3,4)) %>% 
+  dplyr::filter(genomad_virus_score >= 0.9) %>% 
+  dplyr::filter(checkv_contamination <= 5) %>% 
+  dplyr::filter(virsorter2_score >= 0.9) %>% 
+  dplyr::filter(vibrant_quality_score %in% c(1,2,3,4)) %>% 
+  # sort by checkv_quality_score 
+  dplyr::arrange(desc(checkv_completeness)) %>% 
+  dplyr::filter(checkv_completeness >= 20)
+
+
+
+df_contig_annotation_host <- df_contig_annotation %>% 
+  dplyr::select(c("vOTU_id", starts_with("host_"))) %>% 
+  # aggregate by vOTU_id, sum the values
+  dplyr::group_by(vOTU_id) %>%
+  dplyr::summarise(across(everything(), ~ sum(.x, na.rm = TRUE))) %>% 
+  dplyr::ungroup()
+
+# df_contig_annotation_host2 <- df_contig_annotation_host %>% 
+  # dplyr::mutate(across(starts_with("host_"), ~ ifelse(. > 0, 1, 0)))
+
+# vOTU representative contigs
+df_vOTUrep_filtered <- df_contig_annotation_filtered %>% 
+  # remove duplicates by vOTU_id, only keep the first one
+  dplyr::distinct(vOTU_id, .keep_all = TRUE) %>% 
+  # remove columns that contains "host_" in the name
+  dplyr::select(-dplyr::matches("host_")) %>% 
+  dplyr::left_join(df_contig_annotation_host, by = "vOTU_id") %>% 
+  # vOTU prevalence in all hosts
+  dplyr::rowwise() %>% 
+  dplyr::mutate(vOTU_prevalence = sum(c_across(starts_with("host"))>0)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::select(-c("contig_id", "study_id", "assembly_id", "sample_id"))
+
+
+mean(df_vOTUrep_filtered$checkv_completeness, na.rm = TRUE)
+
+df_amg_dramv_filtered <- dplyr::filter(df_amg_dramv, contig_id %in% df_contig_annotation_filtered$contig_id)
+df_amg_vibrant_filtered <- dplyr::filter(df_amg_vibrant, contig_id %in% df_contig_annotation_filtered$contig_id)
+df_host_filtered <- dplyr::filter(df_host, contig_id %in% df_contig_annotation_filtered$contig_id)
+df_vcontact_filtered <-  dplyr::filter(df_vcontact3, vc_id %in% df_contig_annotation_filtered$vc_id)
+df_metadata_filtered <-  dplyr::filter(df_metadata, study_id %in% df_contig_annotation_filtered$study_id)
+
+# write filtered data to sqlite
+DBI::dbWriteTable(con, "amg_dramv_filtered", df_amg_dramv_filtered, overwrite = TRUE)
+DBI::dbWriteTable(con, "amg_vibrant_filtered", df_amg_vibrant_filtered, overwrite = TRUE)
+DBI::dbWriteTable(con, "host_filtered", df_host_filtered, overwrite = TRUE)
+DBI::dbWriteTable(con, "vcontact_filtered", df_vcontact_filtered, overwrite = TRUE)
+DBI::dbWriteTable(con, "contig_annotation_filtered", df_contig_annotation_filtered, overwrite = TRUE)
+DBI::dbWriteTable(con, "sample_metadata_filtered", df_metadata_filtered, overwrite = TRUE)
+DBI::dbWriteTable(con, "contig_annotation_filtered_vOTU", df_vOTUrep_filtered, overwrite = TRUE)
+```
+
+
+
+```{r protein annotation}
+df_eggnog <- fread(here(path_data, "anno_eggnog.tsv.gz")) %>% 
+  dplyr::mutate(contig_id = str_replace_all(query, "_.*", "")) %>% 
+  dplyr::rename(protein_id = query) %>%
+  dplyr::select(c(contig_id, everything()))
+
+df_dramv <- fread(here(path_data, "anno_dramv.tsv.gz")) %>% 
+  dplyr::mutate(contig_id = str_replace_all(scaffold, "-cat_.*", "")) %>% 
+  dplyr::mutate(protein_id = str_replace_all(V1, "-cat_.*_", "_")) %>%
+  dplyr::select(c(contig_id, protein_id, everything()))
+
+DBI::dbWriteTable(con, "anno_prot_eggnog", df_eggnog, overwrite = TRUE, row.names = FALSE)
+DBI::dbWriteTable(con, "anno_prot_dramv", df_dramv, overwrite = TRUE, row.names = FALSE)
 ```
 
 

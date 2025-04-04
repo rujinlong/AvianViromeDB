@@ -1,16 +1,26 @@
 Package: AvianViromeDB
-Title: An R package for project xxx
+Title: Avian Virome Database
 Version: 0.0.1
 Authors@R: 
     person("Jinlong", "Ru", , "jinlong.ru@gmail.com", role = c("aut", "cre"))
-Description: This is the package and shiny app for project AvianViromeDB.
+Description: A comprehensive database and interactive web application for exploring
+    avian bacteriophage (virome) sequences. This database contains public NGS 
+    sequencing data that has been assembled, annotated, and categorized to provide
+    a valuable resource for researchers studying avian viromes.
 License: GPL (>= 3)
 URL: https://github.com/rujinlong/AvianViromeDB
 BugReports: https://github.com/rujinlong/AvianViromeDB/issues
 Imports: 
     config,
+    DBI,
+    DT,
+    fresh,
     golem,
-    shiny
+    plotly,
+    RSQLite,
+    shiny,
+    shinydashboard,
+    shinyjs
 Suggests: 
     knitr,
     rmarkdown,

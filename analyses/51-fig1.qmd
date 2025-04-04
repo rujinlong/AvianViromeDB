@@ -1,0 +1,322 @@
+---
+title: "51-fig1"
+title-block-banner: true
+author:
+  - name: Xueqin Yang
+date: 2025-04-28
+toc: true
+toc-depth: 4
+number-sections: true
+code-fold: true
+code-line-numbers: true
+code-tools: true
+format: 
+  html:
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: full
+reference-location: section
+citation-location: document
+params:
+  name: "51-fig1"
+---
+
+**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
+
+The purpose of this document is ...
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "51-fig1")
+here::i_am(paste0(params$name, ".qmd"), uuid = "ca873c64-1ed8-45fb-9c24-03c9e7698c3f")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+#| warning: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  library(data.table)
+  library(tidygeocoder)
+  library(scatterpie)
+  library(ggrepel)
+  library(svglite)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+## Tasks
+
+The first task is ...
+
+```{r update geo_coords}
+#| message: false
+#| warning: false
+# Read a table into an R data frame
+df_metadata <- dbReadTable(con, "sample_metadata") %>%
+  # Standardize location names with consistent formatting
+  dplyr::mutate(geo_loc_name = stringr::str_replace_all(geo_loc_name, 
+    # Create a named vector for all replacements
+    c(
+      # Format standardization
+      ": " = ":",
+      
+      # Chinese province/city name standardization
+      "GuangDong|Guandong" = "Guangdong",
+      "Changsha" = "Hunan",
+      "HaiYan|lanxi|ShaoXing|ZheJiang|Jiaxing|HangZhou|Hangzhou" = "Zhejiang",
+      "HeNan" = "Henan",
+      "Huaian|JiangShu|JiangSu|Nanjing|Nantong|Suzhou|Yancheng|Yangzhou" = "Jiangsu",
+      "Huanggang|AnHui" = "Anhui",
+      "Huangshi|Jingzhou|Yichang" = "Hubei",
+      "JiAn|Nanchang|Jiangxi Poyanghu" = "Jiangxi",
+      "Taizhou" = "Shandong",
+      "ShanDong" = "Shandong",
+      "FuJian" = "Fujian",
+      "ShangHai" = "Shanghai",
+      "GuiZhou" = "Guizhou",
+      "HeBei" = "Hebei",
+      "Qinghai Gengga Lake" = "Qinghai",
+      "shenzhen" = "Shenzhen",
+      
+      # International location standardization
+      "United Kingdom:Norwich" = "United Kingdom",
+      "USA:Connecticut|USA:New York" = "United States of America",
+      "Austria:Lower Austria" = "Austria",
+      "Canada:Alberta" = "Canada"
+    )))
+
+# Define coordinate corrections for locations that need manual adjustment
+coordinates_updates <- tribble(
+  ~geo_loc_name,          ~lat,        ~long,
+  "China:Hubei",          31.546498,   112.341861,
+  "China:Hebei",          38.037057,   114.468664,
+  "China:Henan",          34.765515,   113.75,
+  "China:Sichuan",        30.5775386,  103.9212532,
+  "China:Jiangxi",        28.687547,   115.8540042,
+  "China:Shanxi",         34.000,      109.000,
+  "China:InnerMogonia",   40.817498,   111.765617,
+  "China:Shandong",       36.668530,   117.020359,
+  "China:FuJian",         25.748,      117.94293,
+  "China:Qinghai",        35.796,      96.57658,
+  "China:Zhejiang",       29.158,      120.23433,
+  "China:Hunan",          27.6008,     111.67666,
+  "China:GuiZhou",        27.75648,    107.67764
+)
+
+
+geo_coords <- df_metadata %>%
+  dplyr::mutate(sample_host = dplyr::case_when(
+    sample_host == "Grus" ~ "Migratory birds",
+    sample_host == "Bird" ~ "Migratory birds",
+    TRUE ~ sample_host
+  )) %>%
+  dplyr::group_by(geo_loc_name, sample_host) %>%
+  dplyr::summarise(count = n(), .groups = "drop") %>%
+  dplyr::group_by(geo_loc_name) %>%
+  dplyr::mutate(total_count = sum(count)) %>%
+  dplyr::group_by(geo_loc_name) %>%
+  dplyr::mutate(proportion = count / sum(count)) %>%
+  tidyr::pivot_wider(id_cols = c(geo_loc_name, total_count), names_from = sample_host, values_from = proportion, values_fill = 0) %>% 
+  tidygeocoder::geocode(address = geo_loc_name, method = "arcgis") %>%
+  dplyr::mutate(across(c("Chicken", "Duck", "Goose", "Pigeon", "Coturnix", "Migratory birds", "Egret"), as.numeric)) %>% 
+  dplyr::left_join(coordinates_updates, by = "geo_loc_name") %>%
+  dplyr::mutate(lat = coalesce(lat.y, lat.x), long = coalesce(long.y, long.x)) %>%
+  dplyr::select(-c(lat.x, lat.y, long.x, long.y))
+```
+
+
+```{r word map}
+# Create base world map
+world_map_data <- map_data("world")
+
+# Set up the base world map
+base_world_map <- ggplot() +
+  # Add world polygons with consistent styling
+  geom_polygon(
+    data = world_map_data,
+    aes(x = long, y = lat, group = group),
+    fill = "#dedede"
+  ) +
+  # Set map extent and appearance
+  coord_cartesian(ylim = c(-60, 90)) + 
+  scale_x_continuous(expand = expansion(add = c(0, 0))) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0))) +
+  # Apply clean map theme
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.line = element_blank(),
+    panel.border = element_blank()
+  )
+
+# Adjust coordinates for better visualization
+adjusted_geo_map <- geo_coords %>%
+  # Make specific coordinate adjustments for visualization purposes
+  mutate(
+    # Adjust latitude and longitude for certain locations to prevent overlap
+    lat = case_when(
+      geo_loc_name == "Austria" ~ lat - 2,
+      TRUE ~ lat 
+    ),
+    long = case_when(
+      geo_loc_name == "Austria" ~ long + 30, 
+      TRUE ~ long  
+    )
+  )
+
+# Define color palette for bird types
+bird_color_palette <- c(
+  "Chicken" = "#2873B3", 
+  "Duck" = "#D55E00", 
+  "Goose" = "#74B346",
+  "Egret" = "#2EBEBE",
+  "Coturnix" = "#7D4444",
+  "Migratory birds" = "#A14462",
+  "Pigeon" = "#8264CC"
+)
+
+# Create the complete map with pie charts at each location
+complete_map <- base_world_map +
+  # Add pie charts sized by sample count
+  geom_scatterpie(
+    data = adjusted_geo_map,
+    aes(
+      x = long, 
+      y = lat, 
+      group = geo_loc_name, 
+      r = sqrt(total_count) / 3
+    ),
+    cols = names(bird_color_palette),
+    color = NA
+  ) +
+  # Add location labels with repel to avoid overlaps
+  geom_text_repel(
+    data = adjusted_geo_map,
+    aes(x = long, y = lat, label = geo_loc_name),
+    segment.size = 0.8,
+    size = 8
+  ) +
+  # Add reference line segment
+  geom_segment(
+    aes(x = 14, y = 47, xend = 37, yend = 47),
+    linewidth = 0.8,
+    linetype = "solid"
+  ) +
+  # Apply consistent color scheme to pie chart segments
+  scale_fill_manual(
+    values = bird_color_palette,
+    name = "Sample"
+  ) +
+  # Position and style the legend
+  theme(
+    legend.position = c(0.14, 0.3),
+    legend.text = element_text(size = 25),
+    legend.title = element_text(size = 26)
+  )
+
+ggsave(path_target("Figure1_map_all.svg"), plot = complete_map, width = 24, height = 10)
+```
+
+
+```{r zoom map}
+# Select a subset of locations for the zoomed map (focusing on China)
+china_region_locations <- dplyr::filter(geo_coords, str_detect(geo_loc_name, "^China"))
+
+# Create zoomed map of China region
+china_zoom_map <- ggplot() +
+  # Add country borders with distinct styling from the main map
+  borders("world", colour = "gray85", fill = "gray80") +
+  # Add pie charts with appropriate scaling for the zoomed view
+  geom_scatterpie(
+    data = china_region_locations,
+    aes(
+      x = long, 
+      y = lat, 
+      group = geo_loc_name, 
+      r = sqrt(total_count) / 10
+    ),
+    cols = names(bird_color_palette),
+    color = NA,
+    pie_scale = 0.5
+  ) +
+  # Apply the same color scheme as the main map
+  scale_fill_manual(values = bird_color_palette) +
+  # Focus on China region coordinates
+  coord_cartesian(xlim = c(80, 130), ylim = c(20, 50)) + 
+  # Add location labels
+  geom_text_repel(
+    data = china_region_locations,
+    aes(x = long, y = lat, label = geo_loc_name),
+    size = 4,
+    segment.size = 0.8
+  ) +
+  # Apply clean minimal theme with border
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.title = element_blank(), 
+    axis.text = element_blank(), 
+    axis.ticks = element_blank(),
+    # Add bordered frame to highlight this is an inset
+    panel.border = element_rect(
+      colour = "#737373",
+      fill = NA,
+      linewidth = 3,
+      linetype = "solid"
+    )
+  )
+
+# Save the zoomed map for reference
+ggsave(path_target("Figure1_map_zoom.svg"), china_zoom_map, width = 17, height = 10)
+```
+
+
+```{r combine maps}
+# Create composite figure with main map and zoomed inset
+# Using cowplot for consistent layout
+composite_map <- cowplot::ggdraw() +
+  # Add the main world map as base layer
+  cowplot::draw_plot(complete_map) +
+  # Add the China zoom map as an inset in the bottom right
+  cowplot::draw_plot(
+    china_zoom_map, 
+    x = 0.7,      # Position from left
+    width = 0.3,  # Width of inset relative to main plot
+    height = 0.45 # Height of inset relative to main plot
+  )
+
+# Save the final composite map
+ggsave(path_target("Figure1_map_final.svg"), composite_map, width = 24, height = 10)
+```
+
+
+## Files written
+
+These files have been written to the target directory, `r paste0("data/", params$name)`:
+
+```{r list-files-target}
+projthis::proj_dir_info(path_target(), tz = "CET")
+```

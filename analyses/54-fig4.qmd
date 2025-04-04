@@ -1,0 +1,378 @@
+---
+title: "54-fig4"
+title-block-banner: true
+author:
+  - name: Xueqin Yang
+date: 2025-04-28
+toc: true
+toc-depth: 4
+number-sections: true
+code-fold: true
+code-line-numbers: true
+code-tools: true
+format: 
+  html:
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: full
+reference-location: section
+citation-location: document
+params:
+  name: "54-fig4"
+---
+
+**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
+
+The purpose of this document is ...
+
+TODO:
+ 
+- [ ] Sankey plot lacking `my_sankey` function.
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "54-fig4")
+here::i_am(paste0(params$name, ".qmd"), uuid = "a4acd812-c10d-4a2a-82f6-a8e31b391d32")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+#| warning: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  library(data.table)
+  library(cowplot)
+  library(networkD3)
+  library(pcutils)
+  library(sankeyD3)
+  library(webshot2)
+  library(svglite)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+## Tasks
+
+The first task is ...
+
+```{r}
+# Read a table into an R data frame
+df_metadata_filter <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+```
+
+
+```{r fig4A1}
+# Create class-level summary data frame
+create_class_summary <- function(df_metadata) {
+  df_metadata %>%
+    # Select only relevant columns
+    dplyr::select(c("vOTU_id", "class")) %>%
+    # Clean classification labels
+    dplyr::mutate(
+      class = dplyr::case_when(
+        grepl("\\[|\\]", class) ~ "Unclassified",
+        is.na(class) ~ "Unknown",
+        TRUE ~ class
+      )
+    ) %>%
+    # Summarize by class
+    dplyr::group_by(class) %>%
+    dplyr::summarise(
+      vOTU_count = dplyr::n_distinct(vOTU_id),
+      .groups = "drop"
+    ) %>%
+    # Calculate percentages
+    dplyr::mutate(
+      percentage = vOTU_count / sum(vOTU_count),
+      label = scales::percent(percentage, accuracy = 0.1)
+    ) %>%
+    # Order by count for consistent visualization
+    dplyr::arrange(dplyr::desc(vOTU_count)) %>%
+    # Create display name with count and class
+    dplyr::mutate(
+      display_name = paste(vOTU_count, class)
+    ) %>%
+    # Create ordered factor for consistent plotting
+    dplyr::mutate(
+      display_name = factor(display_name, levels = display_name)
+    )
+}
+
+# Generate color palette that works with any number of classes
+create_class_colors <- function(class_summary, seed = 123) {
+  set.seed(seed)
+  
+  # Define standard colors for common classes (if present)
+  standard_colors <- c(
+    "Caudoviricetes" = "#8AC6D1",
+    "Malgrandaviricetes" = "#FFB6B9",
+    "Maveriviricetes" = "#007FB9",
+    "Arfiviricetes" = "#E4694C",
+    "Tectiliviricetes" = "#ff7f00",
+    "Unclassified" = "#FFB756",
+    "Faserviricetes" = "#008000",
+    "Megaviricetes" = "#BF3922",
+    "Repensiviricetes" = "#C0D036",
+    "Quintoviricetes" = "#9370DB",
+    "Revtraviricetes" = "#0000FF",
+    "Unknown" = "#999999"
+  )
+  
+  # Extract class names from display names
+  class_names <- class_summary %>%
+    dplyr::mutate(class_name = gsub("^\\d+ ", "", display_name)) %>%
+    dplyr::pull(class_name)
+  
+  # Create named vector for display names
+  display_names <- class_summary$display_name
+  
+  # Assign colors, using standard colors where available
+  colors <- sapply(class_names, function(cls) {
+    for (std_class in names(standard_colors)) {
+      if (grepl(std_class, cls)) {
+        return(standard_colors[std_class])
+      }
+    }
+    # Generate color for new classes
+    return(scales::hue_pal()(length(class_names))[which(class_names == cls)])
+  })
+  
+  names(colors) <- display_names
+  return(colors)
+}
+
+# Create pie chart
+create_class_pie_chart <- function(class_summary, class_colors) {
+  ggplot2::ggplot(class_summary, ggplot2::aes(x = 2, y = vOTU_count, fill = display_name)) +
+    ggplot2::geom_bar(width = 1, stat = "identity") +
+    ggplot2::theme_classic(base_size = 12) +
+    ggplot2::theme(
+      axis.line = ggplot2::element_blank(),
+      axis.text = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      panel.grid = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 15),
+      legend.title = ggplot2::element_text(size = 15, face = "bold"),
+      plot.title = ggplot2::element_text(hjust = 0.5)
+    ) +
+    ggplot2::coord_polar(theta = "y", start = 3 * pi / 2) +
+    ggplot2::labs(fill = "Class", x = NULL, y = NULL) +
+    ggplot2::scale_fill_manual(values = class_colors)
+}
+
+# Apply the functions
+class_summary <- create_class_summary(df_metadata_filter)
+class_colors <- create_class_colors(class_summary)
+p4a_main <- create_class_pie_chart(class_summary, class_colors)
+
+# Save the plot
+ggplot2::ggsave(
+  path_target("Figure4A1_Composition of vOTUs at the class level1.svg"), 
+  plot = p4a_main, 
+  width = 8, 
+  height = 6
+)
+```
+
+
+```{r fig4A2}
+# Create a subset pie chart excluding the dominant class
+create_subset_pie_chart <- function(class_summary, class_colors, exclude_class = "Caudoviricetes") {
+  # Filter out the specified class
+  subset_data <- class_summary %>%
+    dplyr::filter(!grepl(exclude_class, class)) %>%
+    # Ensure display_name remains an ordered factor
+    dplyr::mutate(
+      display_name = factor(display_name, levels = levels(display_name)[levels(display_name) %in% display_name])
+    )
+  
+  # Generate the plot using proper namespaces
+  ggplot2::ggplot(subset_data, ggplot2::aes(x = 2, y = vOTU_count, fill = display_name)) +
+    ggplot2::geom_bar(width = 1, stat = "identity") +
+    ggplot2::theme_void() +
+    ggplot2::coord_polar(theta = "y") +
+    ggplot2::scale_fill_manual(values = class_colors[names(class_colors) %in% subset_data$display_name]) +
+    ggplot2::theme(legend.position = "none")
+}
+
+# Apply the function
+p4a_sub <- create_subset_pie_chart(class_summary, class_colors, exclude_class = "Caudoviricetes")
+
+# Save the plot
+ggplot2::ggsave(
+  path_target("Figure4A2_Composition of vOTUs at the class level2.svg"), 
+  plot = p4a_sub, 
+  width = 8, 
+  height = 6
+)
+```
+
+```{r fig4A}
+p4a <- ggdraw() +
+  draw_plot(p4a_main, x = 0.2, y = 0.4, width = 0.8, height = 0.5) +  
+  draw_plot(p4a_sub, x = 0.3, y = 0.1, width = 0.3, height = 0.3) +  
+  draw_line(x = c(0.472, 0.54), y = c(0.46, 0.31), linetype = "dashed", color = "black", size = 0.5) +
+  draw_line(x = c(0.455, 0.36), y = c(0.46, 0.31), linetype = "dashed", color = "black", size = 0.5)
+
+ggsave(path_target("fig4A.svg"), plot = p4a, width = 8, height = 6)
+```
+
+
+
+```{r fig4B1}
+create_family_summary <- function(df_metadata) {
+  df_metadata %>%
+    dplyr::select(c("vOTU_id", "family")) %>%
+    dplyr::mutate(family = dplyr::case_when(
+      grepl("\\[|\\]", family) ~ "Unclassified_F",
+      is.na(family) ~ "Unknown",
+      TRUE ~ family
+    )) %>%
+    dplyr::group_by(family) %>%
+    dplyr::summarise(vOTU_count = dplyr::n_distinct(vOTU_id), .groups = "drop") %>% 
+    dplyr::mutate(family_level = ifelse(vOTU_count < 100, "Other family", family)) %>%
+    dplyr::group_by(family_level) %>%
+    dplyr::summarise(vOTU_count = sum(vOTU_count), .groups = "drop") %>%
+    dplyr::mutate(per = vOTU_count/sum(vOTU_count),
+                  label = paste0(sprintf("%.2f", per * 100),'%'))%>%
+    dplyr::arrange(desc(vOTU_count)) %>%
+    dplyr::mutate(display_name = paste(vOTU_count, family_level)) %>%
+    dplyr::mutate(display_name = factor(display_name, levels = display_name))
+}
+
+create_family_colors <- function(family_summary, seed = 123) {
+  set.seed(seed)
+  
+  # Define standard colors for common families (if present)
+  standard_colors <- c(
+    "Microviridae" = "#FFB6B9",
+    "Peduoviridae" = "#E4694C",
+    "Drexlerviridae" = "#ff7f00",
+    "Salasmaviridae" = "#9370DB",
+    "Autographiviridae" = "#FFB756",
+    "Herelleviridae" = "#CE9FCA",
+    "Rountreeviridae" = "#C0D036",
+    "Suoliviridae" = "#007577",
+    "Schitoviridae" = "#0000FF",
+    "Unclassified_F" = "#8AC6D1"
+  )
+
+  family_names <- family_summary %>%
+    dplyr::mutate(family_name = gsub("^\\d+ ", "", display_name)) %>%
+    dplyr::pull(family_name)
+  
+  display_names <- family_summary$display_name
+  
+  colors <- sapply(family_names, function(fam) {
+    for (std_family in names(standard_colors)) {
+      if (grepl(std_family, fam)) {
+        return(standard_colors[std_family])
+      }
+    }
+    return(scales::hue_pal()(length(family_names))[which(family_names == fam)])
+  })
+
+  names(colors) <- display_names
+  return(colors)
+}
+
+create_family_pie_chart <- function(family_summary, family_colors) {
+  ggplot2::ggplot(family_summary, ggplot2::aes(x = 2, y = vOTU_count, fill = display_name)) +
+    ggplot2::geom_bar(width = 1, stat = "identity") +
+    ggplot2::theme_classic(base_size = 12) +
+    ggplot2::theme(
+      axis.line = ggplot2::element_blank(),
+      axis.text = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      panel.grid = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 15),
+      legend.title = ggplot2::element_text(size = 15, face = "bold"),
+      plot.title = ggplot2::element_text(hjust = 0.5)
+    ) +
+    ggplot2::coord_polar(theta = "y", start = 3 * pi / 2) +
+    ggplot2::labs(fill = "Family", x = NULL, y = NULL) +
+    ggplot2::scale_fill_manual(values = family_colors)
+}
+
+family_summary <- create_family_summary(df_metadata_filter)
+family_colors <- create_family_colors(family_summary)
+p4b_main <- create_family_pie_chart(family_summary, family_colors)
+
+ggsave(path_target("fig4B_main.svg"), plot = p4b_main, width = 8, height = 6)
+```
+
+```{r fig4B_sub}
+create_family_subset_pie_chart <- function(family_summary, family_colors, exclude_family = "Unclassified_F") {
+  subset_data <- family_summary %>%
+    dplyr::filter(!grepl(exclude_family, family_level)) %>%
+    dplyr::mutate(display_name = factor(display_name, levels = levels(display_name)[levels(display_name) %in% display_name]))
+
+  ggplot2::ggplot(subset_data, ggplot2::aes(x = 2, y = vOTU_count, fill = display_name)) +
+    ggplot2::geom_bar(width = 1, stat = "identity") +
+    ggplot2::theme_void() +
+    ggplot2::coord_polar(theta = "y") +
+    ggplot2::scale_fill_manual(values = family_colors[names(family_colors) %in% subset_data$display_name]) +
+    ggplot2::theme(legend.position = "none")
+}
+
+p4b_sub <- create_family_subset_pie_chart(family_summary, family_colors, exclude_family = "Unclassified_F")
+
+ggsave(path_target("fig4B_sub.svg"), plot = p4b_sub, width = 8, height = 6)
+```
+
+```{r fig4B}
+p4b <- ggdraw() +
+  draw_plot(p4b_main, x = 0.2, y = 0.4, width = 0.8, height = 0.5) +  
+  draw_plot(p4b_sub, x = 0.3, y = 0.1, width = 0.3, height = 0.3) +   
+  draw_line(x = c(0.472, 0.54), y = c(0.46, 0.31), linetype = "dashed", color = "black", size = 0.5) +
+  draw_line(x = c(0.455, 0.36), y = c(0.46, 0.31), linetype = "dashed", color = "black", size = 0.5)
+
+ggsave(path_target("fig4B.svg"), plot = p4b, width = 8, height = 6)
+```
+
+
+```{r fig4C}
+#Figure4C
+df_sankey <- df_metadata_filter %>%
+  dplyr::select(c("vOTU_id","realm","kingdom","phylum","class","order","family")) %>%
+  data.table::setnames(colnames(.), c("vOTU_id","Realm","Kingdom","Phylum","Class","Order","Family")) %>%
+  dplyr::mutate(across(everything(), ~ifelse(grepl("\\[|\\]",.),"Unknown", .))) %>%
+  dplyr::mutate(across(everything(), ~ifelse(is.na(.), "Unknown", .))) %>%
+  dplyr::group_by(Realm,Kingdom, Phylum, Class, Order, Family) %>%
+  dplyr::summarise(Abundance = n(), .groups = "drop") %>%
+  dplyr::arrange(desc(Abundance)) %>%
+  dplyr::mutate(Abundance = as.numeric(Abundance))
+
+p4c <-  pcutils::my_sankey(df_sankey, mode = "sankeyD3")
+
+saveNetwork(p4c, file = path_target("Figure4C_phages_sankey.html"), selfcontained = TRUE)
+webshot(path_target("Figure4C_phages_sankey.html"), path_target("Figure4C_phages_sankey.png"))
+```
+
+
+## Files written
+
+These files have been written to the target directory, `r paste0("data/", params$name)`:
+
+```{r list-files-target}
+projthis::proj_dir_info(path_target(), tz = "CET")
+```

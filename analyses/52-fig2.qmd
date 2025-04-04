@@ -1,0 +1,592 @@
+---
+title: "52-fig2"
+title-block-banner: true
+author:
+  - name: Xueqin Yang
+date: 2025-04-28
+toc: true
+toc-depth: 4
+number-sections: true
+code-fold: true
+code-line-numbers: true
+code-tools: true
+format: 
+  html:
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: full
+reference-location: section
+citation-location: document
+params:
+  name: "52-fig2"
+---
+
+**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
+
+The purpose of this document is ...
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "52-fig2")
+here::i_am(paste0(params$name, ".qmd"), uuid = "691d24a7-e98d-4aa9-87d9-91f23680b226")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+#| warning: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  library(data.table)
+  library(svglite)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+## Tasks
+
+```{r read DB}
+df_contig_annotation <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+df_metadata <- dbReadTable(con, "contig_annotation")
+df_metadata_filter <- dbReadTable(con, "contig_annotation_filtered_vOTU")
+
+# Load sample metadata and standardize host categories
+df_sample_metadata <- dbReadTable(con, "sample_metadata") %>% 
+  # Standardize bird categories 
+  dplyr::mutate(sample_host = dplyr::case_when(
+    sample_host == "Grus" ~ "Migratory birds",
+    sample_host == "Bird" ~ "Migratory birds",
+    TRUE ~ sample_host
+  ))
+
+
+filtered_data <- df_sample_metadata %>%
+  dplyr::select(c("sample_host","study_id")) %>%
+  dplyr::distinct() %>%
+  dplyr::right_join(df_metadata, by = "study_id") %>%
+  dplyr::semi_join(df_metadata_filter, by = "vOTU_id")
+
+colors <- c("Pigeon" = "#9BDCFC", "Migratory birds" = "#F1B8A3", "Goose"="#FBB463",
+            "Egret" = "#DEA6D5", "Coturnix" = "#F17172","Duck"="#B8CF88","Chicken"="#778ccc")
+
+quality_colors <- c("Low quality" = "#FBB463", "Complete" = "#f17172", "Medium quality" = "#c7e1a6", 
+                    "High quality" = "#778ccc", "Not determined" = "#83B0D6")
+```
+
+
+```{r}
+x_labels <- c("2,000 ~ 9,999", "1,0000 ~ 14,999", "15,000 ~ 19,999", "20,000 ~ 24,999", "25,000 ~ 29,999", 
+              "30,000 ~ 34,999", "35,000 ~ 39,999", "40,000 ~ 44,999", "45,000 ~ 49,999",  
+              ">= 50,000")
+
+# Process contig data and create length distribution
+df_ctglen_distribution <- df_contig_annotation %>%
+  # Select only required columns
+  dplyr::select(contig_repid, contig_length) %>%
+  # Create custom length ranges with appropriate breaks
+  dplyr::mutate(
+    # Define breaks for different length ranges
+    length_range = cut(
+      contig_length,
+      breaks = c(
+        # Small contigs (2-10kb)
+        2000, 10000,
+        # Medium contigs (10-50kb in 5kb increments)
+        seq(15000, 50000, by = 5000),
+        # Large contigs (50kb to max)
+        max(contig_length, na.rm = TRUE)
+      ),
+      right = FALSE,
+      include.lowest = TRUE
+    )
+  ) %>%
+  # Count contigs in each length range
+  dplyr::count(length_range, name = "count") %>%
+  # Convert length_range from factor to character for manipulation
+  dplyr::mutate(
+    # Convert to character
+    length_range = as.character(length_range),
+    # Convert scientific notation to regular numbers
+    length_range = stringr::str_replace_all(
+      length_range, 
+      "(\\d+\\.?\\d*)e([+-]?\\d+)", 
+      function(x) format(as.numeric(x), scientific = FALSE)
+    )
+  ) %>%
+  # Maintain the original order of length ranges
+  dplyr::mutate(
+    length_range = factor(length_range, levels = unique(length_range))
+  )
+
+p2a <- ggplot(df_ctglen_distribution, aes(x = length_range, y = count)) +
+  geom_bar(stat = "identity", fill = "#00BFFF", color = "black", linewidth = 1) + 
+  labs(title = "", x = "Genome length (bp)", y = "Number of phage genomes") +
+  theme_minimal() + 
+  theme(
+    text = element_text(family = "Arial"),
+    axis.text.x = element_text(color = "black", size = 20,angle = 45, hjust = 1),
+    axis.text.y = element_text(color = "black", size = 20),
+    axis.title.x = element_text(color = "black", size = 25),
+    axis.title.y = element_text(color = "black", size = 25),
+    axis.line = element_line(color = "black", linewidth = 0.8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()) +
+  scale_x_discrete(labels = x_labels)
+
+ggsave(path_target("fig2A.svg"), p2a, width = 11, height = 8)
+```
+
+
+```{r}
+df_ctg_quality <- df_contig_annotation %>%
+  dplyr::select(c("vOTU_id","checkv_quality_score","checkv_completeness")) %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(quality_description = case_when(
+    checkv_quality_score == 1 ~ "Complete",
+    checkv_quality_score == 2 ~ "High quality",
+    checkv_quality_score == 3 ~ "Medium quality",
+    checkv_quality_score == 4 ~ "Low quality",
+    checkv_quality_score == 5 ~ "Not determined",
+    TRUE ~ NA_character_
+  ))
+
+df_quality_summary <- df_ctg_quality %>%
+  dplyr::select(c("vOTU_id", "quality_description")) %>% 
+  count(quality_description) %>%
+  arrange(desc(n)) %>%
+  mutate(
+    quality_description = factor(quality_description, levels = quality_description),
+    percentage = n / sum(n) * 100,
+    label = paste0(round(percentage, 1), "%"),
+    pos = cumsum(n) - n / 2
+  ) %>%
+  dplyr::mutate(quality_description = factor(quality_description, levels = c("Complete","High quality","Medium quality","Low quality","Not determined")))
+
+
+p2b1 <- ggplot(df_quality_summary, aes(x = "", y = n, fill = quality_description)) +
+  geom_bar(width = 1, stat = "identity") +
+  geom_text(aes(y = pos, label = label), color = "black", size = 6) +
+  theme_classic(base_size=12)+
+  theme(axis.line=element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        panel.grid=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 15,face = "bold"),
+        plot.title=element_text(hjust=0.5))+
+  coord_polar(theta="y")+
+  labs(fill="Total vOTUs",x=NULL,y=NULL)+
+  scale_fill_manual(values = quality_colors) 
+
+ggsave(path_target("fig2B1.svg"), plot = p2b1, width = 8, height = 4)
+```
+
+
+```{r fig2b2}
+# Load sample metadata and standardize host categories
+df_sample <- df_sample_metadata %>%
+  # Select only relevant columns and remove duplicates
+  dplyr::select(c("sample_host", "study_id")) %>%
+  dplyr::distinct()
+
+# Extract vOTU to study relationships
+votu_study <- df_metadata %>% 
+  dplyr::select(c("study_id", "contig_id", "vOTU_id")) %>%
+  dplyr::distinct()
+
+# Calculate quality percentages by host type
+pt <- votu_study %>%
+  # Link vOTUs to host types
+  dplyr::left_join(df_sample, by = "study_id") %>%
+  dplyr::select(c("sample_host", "vOTU_id")) %>%
+  dplyr::distinct() %>%
+  # Join with quality data
+  dplyr::right_join(df_ctg_quality, by = "vOTU_id") %>%
+  # Focus on relevant columns for analysis
+  dplyr::select(c("sample_host", "quality_description")) %>%
+  # Count occurrences of each quality level per host
+  dplyr::group_by(sample_host, quality_description) %>%
+  dplyr::summarise(quality_description_Count = n(), .groups = 'drop') %>%
+  # Calculate percentages within each host type
+  dplyr::group_by(sample_host) %>%
+  dplyr::mutate(Percentage = quality_description_Count / sum(quality_description_Count) * 100) %>%
+  dplyr::ungroup() %>%
+  # Set factor levels for consistent ordering in visualization
+  dplyr::mutate(
+    quality_description_Count = as.numeric(quality_description_Count),
+    quality_description = factor(
+      quality_description, 
+      levels = c("Complete", "High quality", "Medium quality", "Low quality", "Not determined")
+    ),
+    sample_host = factor(
+      sample_host, 
+      levels = c("Pigeon", "Migratory birds", "Grus", "Egret", "Coturnix", "Goose", "Duck", "Chicken")
+    )
+  )
+
+# Define a color palette for quality levels
+quality_colors <- c(
+  "Low quality" = "#FBB463", 
+  "Complete" = "#f17172", 
+  "Medium quality" = "#c7e1a6", 
+  "High quality" = "#778ccc", 
+  "Not determined" = "#83B0D6"
+)
+
+# Create stacked bar chart of quality percentages by host
+p2b2 <- ggplot(pt, aes(x = sample_host, y = Percentage, fill = quality_description)) +
+  # Create stacked bars
+  geom_bar(stat = "identity", width = 0.85) +
+  # Format y-axis as percentages
+  scale_y_continuous(
+    expand = c(0.02, 0),
+    labels = function(x) paste0(x, "%"),
+    breaks = c(0, 100)
+  ) +
+  # Add some padding to x-axis
+  scale_x_discrete(expand = c(0.02, 0.02)) +
+  # Set axis labels
+  labs(x = "", y = " ", fill = "") +
+  # Apply custom color palette
+  scale_fill_manual(values = quality_colors) +
+  # Flip coordinates for horizontal bars
+  coord_flip() +
+  # Apply clean theme
+  theme_bw() +
+  # Fine-tune visual appearance
+  theme(
+    panel.border = element_rect(color = "black"),
+    # Format axis text
+    axis.text.x = element_text(color = "black", size = 30, margin = margin(r = 0)),
+    axis.text.y = element_text(color = "black", size = 30, margin = margin(l = 0)),
+    # Format axis titles
+    axis.title.x = element_text(color = "black", size = 30),
+    axis.title.y = element_text(color = "black", size = 30),
+    # Format axis lines and ticks
+    axis.line = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.y = element_blank(),
+    # Remove grid lines
+    panel.grid = element_blank(),
+    # Remove legend
+    legend.text = element_blank(),
+    legend.position = "none",
+    # Add margin around plot
+    plot.margin = unit(c(0.3, 1, 0, 0), "cm"),
+    # Format title
+    plot.title = element_text(size = 25, face = "", hjust = 0.5)
+  )
+
+ggsave(path_target("fig2B2.svg"), plot = p2b2, width = 10,height = 8)
+```
+
+
+```{r fig2C_density}
+# Prepare the vOTU quality data
+df_p2c <- df_contig_annotation %>%
+  # Select only relevant columns
+  dplyr::select(c("vOTU_id", "checkv_quality_score", "contig_length")) %>%
+  # Create descriptive quality labels from numeric scores
+  dplyr::mutate(
+    quality_label = dplyr::case_when(
+      checkv_quality_score == 1 ~ "Complete",
+      checkv_quality_score == 2 ~ "High quality",
+      checkv_quality_score == 3 ~ "Medium quality",
+      checkv_quality_score == 4 ~ "Low quality",
+      checkv_quality_score == 5 ~ "Not determined",
+      TRUE ~ NA_character_
+    ),
+    # Ensure consistent factor ordering for plotting
+    checkv_quality_score = factor(checkv_quality_score, levels = c(1, 2, 3, 4, 5)),
+    # Pre-calculate log10 of contig length for plotting
+    log10_length = log10(contig_length)
+  )
+
+# Create summary statistics by quality category
+df_summary <- df_p2c %>%
+  dplyr::group_by(quality_label) %>%
+  dplyr::summarise(
+    count = dplyr::n(), 
+    mean_length = mean(contig_length, na.rm = TRUE)
+  ) %>%
+  # Create formatted labels for the legend
+  dplyr::mutate(label = stringr::str_glue("{quality_label} (n = {count})"))
+
+# Calculate density peak positions for each quality category using tidyverse approach
+peak_positions <- df_p2c %>%
+  dplyr::group_by(checkv_quality_score) %>%
+  # Use nest to handle density calculations within tidyverse flow
+  tidyr::nest() %>%
+  dplyr::mutate(
+    # Calculate density for each group
+    density_data = purrr::map(data, ~{
+      d <- density(.x$log10_length)
+      tibble::tibble(
+        x = d$x,
+        y = d$y
+      )
+    }),
+    # Extract peak positions and heights
+    peak_data = purrr::map(density_data, ~{
+      peak_idx <- which.max(.x$y)
+      tibble::tibble(
+        peak_position = .x$x[peak_idx],
+        peak_height = .x$y[peak_idx]
+      )
+    })
+  ) %>%
+  # Unnest the peak data
+  dplyr::select(checkv_quality_score, peak_data) %>%
+  tidyr::unnest(peak_data)
+
+# Define quality category labels and color palette using named vectors
+quality_labels <- c(
+  "1" = "Complete", 
+  "2" = "High quality", 
+  "3" = "Medium quality", 
+  "4" = "Low quality"
+)
+
+quality_colors <- c(
+  "1" = "#069DFF",  # Blue for Complete
+  "2" = "#C94E65",  # Red for High quality
+  "3" = "#3ABF99",  # Green for Medium quality
+  "4" = "#D9995B"   # Orange for Low quality
+)
+
+# Create formatted legend labels with counts using tidyverse
+legend_labels <- df_p2c %>%
+  dplyr::count(checkv_quality_score) %>%
+  dplyr::mutate(
+    # Use str_glue for string formatting
+    label = stringr::str_glue("{quality_labels[as.character(checkv_quality_score)]} (n = {n})")
+  ) %>%
+  dplyr::pull(label, name = checkv_quality_score)
+
+# Create density plot
+p2c <- ggplot(df_p2c, aes(x = log10_length, fill = checkv_quality_score, color = checkv_quality_score)) +
+  # Add density curves with transparency
+  geom_density(alpha = 0.5) + 
+  # Add vertical lines at density peaks
+  geom_segment(
+    data = peak_positions, 
+    aes(
+      x = peak_position, 
+      xend = peak_position, 
+      y = 0, 
+      yend = peak_height, 
+      color = checkv_quality_score
+    ),
+    linetype = "dashed", 
+    linewidth = 0.8  # Updated from 'size' for newer ggplot2 versions
+  ) +
+  # Apply custom color schemes
+  scale_fill_manual(
+    values = quality_colors, 
+    labels = legend_labels,
+    guide = guide_legend(override.aes = list(alpha = 0.5))
+  ) +
+  scale_color_manual(
+    values = quality_colors,
+    labels = legend_labels
+  ) +
+  # Set axis ranges and labels
+  scale_x_continuous(
+    limits = c(3.5, 6), 
+    breaks = scales::breaks_width(1)  # Using scales for better breaks
+  ) +
+  # Set plot labels
+  labs(
+    title = "", 
+    x = "Log10(Length)", 
+    y = "Density"
+  ) +
+  # Apply clean theme
+  theme_classic(base_size = 12) +
+  # Customize appearance
+  theme(
+    # Legend positioning and appearance
+    legend.position = c(0.8, 0.6),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 14),
+    # Axis text and title formatting
+    axis.text.x = element_text(color = "black", size = 25),
+    axis.text.y = element_text(color = "black", size = 25),
+    axis.title.x = element_text(color = "black", size = 25),
+    axis.title.y = element_text(color = "black", size = 25),
+    # Axis line and tick formatting
+    axis.line = element_line(color = "black", linewidth = 1),  # Updated from 'size'
+    axis.ticks = element_line(color = "black", linewidth = 1),  # Updated from 'size'
+    # Remove grid lines
+    panel.grid = element_blank()  # Simplified grid removal
+  ) +
+  # Configure legend appearance
+  guides(
+    color = guide_legend("vOTUs Quality"), 
+    fill = "none"
+  )
+
+# Save the plot with ggplot2 ggsave
+ggsave(path_target("Figure2C_density.svg"), plot = p2c, width = 8, height = 5)
+```
+
+
+```{r fig2D1}
+df_p2d1 <- df_sample_metadata %>%
+  # Select only relevant columns and remove duplicates
+  dplyr::select(c("study_id", "sample_host")) %>%
+  dplyr::group_by(sample_host) %>%
+  dplyr::summarise(sample_count = dplyr::n(), .groups = 'drop') %>%
+  dplyr::mutate(sample_host = factor(sample_host, levels = c("Pigeon", "Migratory birds", "Egret","Coturnix", "Goose","Duck" , "Chicken")))
+
+p2d1 <- ggplot(df_p2d1, aes(x = sample_host, y = sample_count,fill = sample_host)) +
+  geom_bar(width = 0.8, stat = "identity") +
+  labs(x = "", y = "Sample size") +
+  scale_y_continuous(breaks = c(0, 1000,2000),
+                     expand = c(0.02,0.02)) +
+  scale_x_discrete(expand = c(0.08,0.02)) +
+  geom_text(aes(label = sample_count), vjust = 0, hjust = 0.8, size = 3) +
+  scale_fill_manual(values = colors, breaks=c( "Chicken","Duck" ,"Goose", "Coturnix", "Egret","Migratory birds"
+                                               ,"Pigeon", "Grus" )) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(color = "black", size = 20),
+    axis.text.y = element_text(color = "black", size = 20),
+    axis.title.x = element_text(color = "black", size = 20),
+    axis.title.y = element_text(color = "black", size = 20),
+    axis.line.x = element_line(color = "black", linewidth = 0.5),
+    axis.line.y = element_line(color = "black",linewidth = 0.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.y = element_line(color = "black", linewidth = 0.5),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.title = element_blank(),
+    legend.text = element_text(color = "black", size = 20),
+    plot.margin = unit(c(0.3, 1, 0, 0), "cm") ,
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5)
+  ) +
+  coord_flip() +
+  theme(legend.position = "none")
+
+ggsave(path_target("Figure2D1.svg"), plot = p2d1, width = 6, height = 8)
+```
+
+
+```{r fig2D2}
+df_sample <- df_sample_metadata %>% 
+  # Select only relevant columns and remove duplicates
+  dplyr::select(c("sample_host", "study_id")) %>%
+  dplyr::distinct()
+
+df_votu_number <- df_metadata %>%
+  dplyr::left_join(df_sample, by = "study_id") %>%
+  dplyr::semi_join(df_metadata_filter, by = "vOTU_id") %>%
+  dplyr::select(c("vOTU_id","sample_host")) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(sample_host) %>%
+  dplyr::summarise(votu = dplyr::n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(sample_host = factor(sample_host, levels = c("Pigeon", "Migratory birds", "Egret","Coturnix", "Goose","Duck" , "Chicken")))
+
+p2d2 <- ggplot(df_votu_number, aes(x = sample_host, y = votu,fill = sample_host)) +
+  geom_bar(width = 0.8, stat = "identity") +
+  labs(x = "", y = "Nr. of vOTUs for\neach Animal host") +
+  scale_y_continuous(breaks = c(0, 20000,40000),
+                     expand = c(0.02,0.02)) +
+  scale_x_discrete(expand = c(0.08,0.02)) +
+  scale_fill_manual(values = colors, breaks=c( "Chicken","Duck" ,"Goose", "Coturnix", "Egret","Migratory birds"
+                                               ,"Pigeon" )) +
+  geom_text(aes(label = votu), vjust = 0, hjust = 0.8, size = 3) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(color = "black", size = 20),
+    axis.text.y = element_text(color = "black", size = 20),
+    axis.title.x = element_text(color = "black", size = 20),
+    axis.title.y = element_text(color = "black", size = 20),
+    axis.line.x = element_line(color = "black", linewidth = 0.5),
+    axis.line.y = element_line(color = "black",linewidth = 0.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.title = element_blank(),
+    legend.text = element_text(color = "black", size = 20),
+    plot.margin = unit(c(0.3, 1, 0, 0), "cm") ,
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5)
+  ) +
+  theme(axis.text.y = element_blank()) +
+  coord_flip() +
+  theme(legend.position = "none")
+
+ggsave(path_target("Figure2D2.svg"), plot = p2d2, width = 4, height = 8)
+```
+
+
+```{r fig2D3}
+df_sample_host <- filtered_data %>%
+  dplyr::select(c("vOTU_id","sample_host","contig_length")) %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(sample_host = factor(sample_host, levels = c("Pigeon", "Migratory birds", "Egret","Coturnix", "Goose","Duck" , "Chicken")))
+
+p2d3 <- ggplot(df_sample_host, aes(x = sample_host, y = contig_length, fill = sample_host)) +
+  geom_violin(aes(color = sample_host), linewidth = 1.2, alpha = 0.8) +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  labs(x = "", y = "Genome size\n  ") +
+  scale_y_continuous(
+    expand = c(0.02, 0.8),
+    breaks = c(100000, 400000),
+    minor_breaks = seq(50000, 500000, by = 100000)
+  ) +
+  scale_x_discrete(expand = c(0.02, 0.5)) +
+  theme_bw() +
+  geom_point(position = position_jitter(0.2), aes(color = sample_host)) +
+  theme(
+    panel.border = element_rect(color = "black", linewidth = 0.5),
+    axis.text.x = element_text(color = "black", size = 20),
+    axis.text.y = element_text(color = "black", size = 20), 
+    axis.title.x = element_text(color = "black", size = 20, hjust = 0.5),
+    axis.title.y = element_text(color = "black", size = 20),
+    axis.line.x = element_line(color = "black", linewidth = 0.5),
+    axis.line.y = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 0.5),
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_line(color = "grey", linewidth = 1, linetype = "dashed"),
+    legend.title = element_blank(),
+    legend.position = "none",
+    plot.margin = unit(c(0.3, 1, 0, 0), "cm"),
+    plot.title = element_text(size = 20, face = "", hjust = 0.5)
+  ) +
+  theme(axis.text.y = element_blank()) +
+  coord_flip()
+
+ggsave(path_target("Figure2D3.svg"), plot = p2d3, width = 4, height = 8)
+```
+
+
+## Files written
+
+These files have been written to the target directory, `r paste0("data/", params$name)`:
+
+```{r list-files-target}
+projthis::proj_dir_info(path_target(), tz = "CET")
+```
