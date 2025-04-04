@@ -1,0 +1,128 @@
+---
+title: "11-EDA"
+title-block-banner: true
+author:
+  - name: Jinlong Ru
+    orcid: 0000-0002-6757-6018
+date: 2025-04-04
+toc: true
+toc-depth: 4
+number-sections: true
+code-fold: true
+code-line-numbers: true
+code-tools: true
+format: 
+  html:
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: full
+reference-location: section
+citation-location: document
+params:
+  name: "11-EDA"
+---
+
+**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
+
+The purpose of this document is ...
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "11-EDA")
+here::i_am(paste0(params$name, ".qmd"), uuid = "4644fe2d-5202-425c-83e5-35cc1099ccba")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  library(data.table)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+## Tasks
+
+```{r import data}
+df_contig_annotation <- DBI::dbReadTable(con, "contig_annotation")
+df_host <- DBI::dbReadTable(con, "host")
+df_metadata <- DBI::dbReadTable(con, "sample_metadata")
+df_vc3 <- DBI::dbReadTable(con, "vcontact") %>%
+  dplyr::filter(Reference == FALSE)
+```
+
+```{r}
+table(df_contig_annotation$checkv_quality)
+
+ctg4tree <- df_contig_annotation %>%
+  # sort by checkv_quality_score in ascending order
+  dplyr::arrange(checkv_quality_score) %>%
+  # remove duplicated contig_id, only keep the first one
+  dplyr::distinct(vOTU_id, .keep_all = TRUE) %>%
+  # only keep complete and high quality contigs
+  dplyr::filter(checkv_quality_score %in% c(1, 2)) %>%
+  dplyr::filter(checkv_contamination < 5) %>%
+  dplyr::filter(contig_length >= 10000) %>% 
+  dplyr::select(c("contig_id", "vOTU_id", "vc_id", "contig_length", "realm", "kingdom", "phylum", "class", "order", "family", "genus", "species", "vc_novel_genus", "lifestyle"))
+
+# save to tsv file
+data.table::fwrite(ctg4tree, path_target("ctg4tree.tsv"), sep = "\t")
+```
+
+
+```{r}
+df_amg_dramv <- DBI::dbReadTable(con, "amg_dramv")
+
+df_module <- df_amg_dramv %>%
+  dplyr::select(gene, header, auxiliary_score) %>%
+  # convert auxiliary_score to factor, and order it by its levels c(1, 2, 3)
+  dplyr::group_by(auxiliary_score) %>%
+  dplyr::count(header, name = "n_amg") %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(header != "") %>%
+  dplyr::mutate(auxiliary_score = factor(auxiliary_score, levels = c(1, 2, 3))) %>%
+  # sort by n_amg in descending order
+  dplyr::arrange(desc(n_amg))
+
+# plot the number of AMGs per module using bar plot, colored by auxiliary_score
+df_module %>%
+  dplyr::group_by(header) %>%
+  dplyr::mutate(sum_n_amg = sum(n_amg)) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(-c("n_amg", "auxiliary_score")) %>%
+  dplyr::arrange(desc(sum_n_amg)) %>%
+  dplyr::distinct() %>%
+  # dplyr::filter(auxiliary_score == 1) %>%
+  head(30) %>%
+  ggplot(aes(x = sum_n_amg, y = reorder(header, sum_n_amg))) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_classic()
+```
+
+## Files written
+
+These files have been written to the target directory, `r paste0("data/", params$name)`:
+
+```{r list-files-target}
+DBI::dbDisconnect(con)
+projthis::proj_dir_info(path_target(), tz = "CET")
+```

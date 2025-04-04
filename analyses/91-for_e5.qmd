@@ -1,0 +1,102 @@
+---
+title: "91-for_e5"
+title-block-banner: true
+author:
+  - name: Jinlong Ru
+    orcid: 0000-0002-6757-6018
+date: 2025-03-05
+toc: true
+toc-depth: 4
+number-sections: true
+code-fold: true
+code-line-numbers: true
+code-tools: true
+format: 
+  html:
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: full
+reference-location: section
+citation-location: document
+params:
+  name: "91-for_e5"
+---
+
+**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
+
+The purpose of this document is ...
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "91-for_e5")
+here::i_am(paste0(params$name, ".qmd"), uuid = "c7b1102f-42ab-40f0-afd5-7ca4efa219f1")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+## Tasks
+
+The first task is ...
+
+```{r}
+df_contig_annotation <- DBI::dbReadTable(con, "contig_annotation")
+```
+
+```{r}
+df_repid_10k <- df_contig_annotation %>%
+  dplyr::filter(contig_length > 10000) %>%
+  dplyr::select(contig_repid) %>%
+  dplyr::distinct()
+
+# save to csv file without header
+data.table::fwrite(df_repid_10k, path_target("repid_10k.csv"), col.names = FALSE)
+```
+
+### vConTACT3 high-quality contigs
+
+CheckV complete + high quality contigs + > 10kb + < 5% contamination => vcontact3 for e3 paper network figure
+
+```{r}
+df_repid_vc3_small <- df_contig_annotation %>%
+  dplyr::filter(checkv_quality_score <= 2) %>%
+  dplyr::filter(checkv_contamination == 0) %>%
+  dplyr::filter(contig_length > 10000) %>%
+  dplyr::select(contig_repid) %>%
+  dplyr::distinct()
+
+# save to csv file without header
+data.table::fwrite(df_repid_vc3_small, path_target("repid_vc3_small_hq.csv"), col.names = FALSE)
+```
+
+## Files written
+
+These files have been written to the target directory, `r paste0("data/", params$name)`:
+
+```{r list-files-target}
+projthis::proj_dir_info(path_target(), tz = "CET")
+```

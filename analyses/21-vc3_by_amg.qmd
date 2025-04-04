@@ -1,0 +1,94 @@
+---
+title: "21-vc3_by_amg"
+title-block-banner: true
+author:
+  - name: Jinlong Ru
+    orcid: 0000-0002-6757-6018
+date: 2025-04-04
+toc: true
+toc-depth: 4
+number-sections: true
+code-fold: true
+code-line-numbers: true
+code-tools: true
+format: 
+  html:
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: full
+reference-location: section
+citation-location: document
+params:
+  name: "21-vc3_by_amg"
+---
+
+**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
+
+The purpose of this document is ...
+
+```{r setup}
+#| message: false
+#| include: false
+#| warning: false
+wd <- "analyses"
+if (basename(getwd()) != wd) {
+  setwd(here::here(wd))
+}
+params <- list(name = "21-vc3_by_amg")
+here::i_am(paste0(params$name, ".qmd"), uuid = "90c2eddd-0512-49c5-b963-e6ac02702483")
+projthis::proj_create_dir_target(params$name, clean = FALSE)
+path_target <- projthis::proj_path_target(params$name)
+path_source <- projthis::proj_path_source(params$name)
+path_raw <- path_source("00-raw")
+path_resource <- here::here(path_raw, "d00-resource")
+path_data <- here::here(path_raw, paste0("d", params$name))
+dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r packages}
+#| message: false
+suppressPackageStartupMessages({
+  library(here)
+  library(conflicted)
+  library(tidyverse)
+  library(data.table)
+  devtools::load_all()
+})
+
+con <- load_db()
+```
+
+## Tasks
+
+The first task is ...
+
+```{r}
+df_dramv <- DBI::dbGetQuery(con, "SELECT * FROM amg_dramv") %>% 
+  dplyr::select("contig_id") %>% 
+  distinct() %>% 
+  dplyr::mutate(with_amg = "yes")
+
+df_cclib <- DBI::dbGetQuery(con, "SELECT * FROM contig_annotation")
+
+df_cclib_filter <- df_cclib %>%
+  dplyr::filter(checkv_completeness > 95) %>% 
+  dplyr::filter(checkv_contamination == 0) %>% 
+  dplyr::filter(checkv_provirus == "No") %>% 
+  dplyr::select(c("contig_id", "vc_novel_genus")) %>% 
+  dplyr::distinct() %>% 
+  dplyr::filter(vc_novel_genus == "TRUE") %>% 
+  dplyr::inner_join(df_dramv, by = "contig_id")
+
+fwrite(df_cclib_filter, path_target("novel_contig_with_amg.tsv"))
+```
+
+
+## Files written
+
+These files have been written to the target directory, `r paste0("data/", params$name)`:
+
+```{r list-files-target}
+projthis::proj_dir_info(path_target(), tz = "CET")
+```
