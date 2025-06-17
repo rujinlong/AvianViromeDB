@@ -21,9 +21,7 @@ params:
   name: "52-fig2"
 ---
 
-**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
-
-The purpose of this document is ...
+The purpose of this document is to create Figure 2 of the manuscript.
 
 ```{r setup}
 #| message: false

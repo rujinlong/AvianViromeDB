@@ -22,8 +22,6 @@ params:
   name: "10-import"
 ---
 
-**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
-
 The purpose of this document is to import the metadata and results from ViroProfiler and other tools to a SQLite database for further analysis.
 
 ```{r setup}
@@ -49,6 +47,7 @@ dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
 
 ```{r packages}
 #| message: false
+#| warning: false
 suppressPackageStartupMessages({
   library(here)
   library(conflicted)
@@ -64,8 +63,8 @@ con <- load_db()
 
 NOTE: 
 
-1. vOTU IDs are affected by the `map-aniclst.tsv` file.
-2. VC IDs are affected by the `vcontact3-final_assignments.csv` file.
+1. vOTU IDs are determined by the `map-aniclst.tsv` file.
+2. VC IDs are determined by the `vcontact3-final_assignments.csv` file.
 3. The `study_id` is the same as the `sample_id`, except for the samples from the iMeta2024 paper.
 
 Viral contigs should satisfy the following criteria:
@@ -234,6 +233,16 @@ df_dramv <- fread(here(path_data, "anno_dramv.tsv.gz")) %>%
 DBI::dbWriteTable(con, "anno_prot_eggnog", df_eggnog, overwrite = TRUE, row.names = FALSE)
 DBI::dbWriteTable(con, "anno_prot_dramv", df_dramv, overwrite = TRUE, row.names = FALSE)
 ```
+
+```{r arg}
+df_arg <- fread(here(path_data, "anno_abricate.tsv.gz")) %>% 
+  dplyr::rename(protein_id = SEQUENCE) %>% 
+  dplyr::mutate(contig_id = str_replace_all(protein_id, "-.*", "")) %>% 
+  dplyr::select(c(contig_id, everything()))
+
+DBI::dbWriteTable(con, "anno_prot_ARG", df_arg, overwrite = TRUE, row.names = FALSE)
+```
+
 
 
 ## Files written

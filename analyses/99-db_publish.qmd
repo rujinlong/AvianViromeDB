@@ -22,9 +22,7 @@ params:
   name: "99-db_publish"
 ---
 
-**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
-
-The purpose of this document is ...
+The purpose of this document is to create the AvianViromeDB database files for publication. This script only created folders. The python code `publish.py` will be run to generate the database files.
 
 ```{r setup}
 #| message: false
@@ -46,30 +44,6 @@ dir.create(path_raw, recursive = TRUE, showWarnings = FALSE)
 dir.create(path_data, recursive = TRUE, showWarnings = FALSE)
 dir.create(path_resource, recursive = TRUE, showWarnings = FALSE)
 ```
-
-```{r packages}
-#| message: false
-#| warning: false
-suppressPackageStartupMessages({
-  library(here)
-  library(conflicted)
-  library(tidyverse)
-  library(data.table)
-  devtools::load_all()
-})
-
-con <- load_db()
-con_publish <- DBI::dbConnect(RSQLite::SQLite(), here("AvianViromeDB.sqlite"))
-```
-
-## Tasks
-
-The first task is ...
-
-```{zsh}
-seqkit --version
-```
-
 
 ## Files written
 

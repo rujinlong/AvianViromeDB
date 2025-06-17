@@ -22,9 +22,7 @@ params:
   name: "09-taxonomy"
 ---
 
-**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
-
-The purpose of this document is ...
+The purpose of this document is to analyze and integrate viral taxonomy annotations from two different tools: VITAP and GeNomad. VITAP provides more detailed taxonomic classification down to the species level, while GeNomad classifies viruses to the family level but covers a broader range of genomes. This analysis aims to create a comprehensive taxonomy dataset by prioritizing VITAP annotations when available and falling back to GeNomad annotations when needed.
 
 ```{r setup}
 #| message: false
@@ -61,8 +59,6 @@ con <- load_db()
 ```
 
 ## Tasks
-
-GeNomad only classify genome taxonomically to **family** level, while VITAP can classify genome taxonomically to **species** level. However, GeNomad annotated more genomes than VITAP. Therefore, we use VITAP annotation if possible, otherwise use GeNomad annotation.
 
 ```{r}
 df_taxonomy_vitap <- parse_vitap(here(path_data, "taxonomy_vitap.tsv"), contig_marker = "contig") %>%

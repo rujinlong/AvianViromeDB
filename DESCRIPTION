@@ -3,7 +3,7 @@ Title: Avian Virome Database
 Version: 0.0.1
 Authors@R: 
     person("Jinlong", "Ru", , "jinlong.ru@gmail.com", role = c("aut", "cre"))
-Description: A comprehensive database and interactive web application for exploring
+Description: A comprehensive database for exploring
     avian bacteriophage (virome) sequences. This database contains public NGS 
     sequencing data that has been assembled, annotated, and categorized to provide
     a valuable resource for researchers studying avian viromes.
@@ -11,16 +11,55 @@ License: GPL (>= 3)
 URL: https://github.com/rujinlong/AvianViromeDB
 BugReports: https://github.com/rujinlong/AvianViromeDB/issues
 Imports: 
+    bslib,
     config,
+    conflicted,
+    cowplot,
+    data.table,
     DBI,
+    devtools,
+    dplyr,
     DT,
     fresh,
+    ggExtra,
+    ggplot2,
+    ggraph,
+    ggrepel,
+    ggvenn,
     golem,
+    grid,
+    here,
+    htmltools,
+    htmlwidgets,
+    igraph,
+    knitr,
+    magrittr,
+    networkD3,
+    openxlsx,
+    pcutils,
     plotly,
+    plotrix,
+    projthis,
+    purrr,
+    RColorBrewer,
+    RCy3,
+    reactable,
+    rmarkdown,
     RSQLite,
+    sankeyD3,
+    scales,
+    scatterpie,
     shiny,
     shinydashboard,
-    shinyjs
+    stringr,
+    svglite,
+    tibble,
+    tidygeocoder,
+    tidygraph,
+    tidyr,
+    tidyverse,
+    UpSetR,
+    webshot2
 Suggests: 
     knitr,
     rmarkdown,

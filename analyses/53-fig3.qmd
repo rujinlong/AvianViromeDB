@@ -21,9 +21,7 @@ params:
   name: "53-fig3"
 ---
 
-**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
-
-The purpose of this document is ...
+The purpose of this document is to create Figure 3 of the manuscript.
 
 ```{r setup}
 #| message: false
@@ -63,8 +61,6 @@ con <- load_db()
 ```
 
 ## Tasks
-
-The first task is ...
 
 ```{r}
 df_contig_annotation <- dbReadTable(con, "contig_annotation_filtered_vOTU")

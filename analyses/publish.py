@@ -1,5 +1,33 @@
 #!/usr/bin/env python3
 
+"""
+This script generates the AvianViromeDB database files for publication.
+It creates FASTA files for vOTU genomes and proteins, and generates annotation files.
+
+Author: Jinlong Ru
+ORCID: 0000-0002-6757-6018
+Date: 2025-06-13
+
+The script performs the following tasks:
+1. Creates FASTA files containing only vOTU genomes
+2. Creates FASTA files containing only vOTU proteins
+3. Generates annotation files for vOTUs
+4. Creates a SQLite database with vOTU annotations
+
+Input files:
+- FASTA file containing all viral genomes
+- FASTA file containing all viral proteins
+- Annotation files for viral contigs, prokaryotic hosts, AMG, ARG, etc.
+- Original SQLite database with all intermediate results.
+
+Output files:
+- FASTA file containing only vOTU genomes
+- FASTA file containing only vOTU proteins
+- TSV file with vOTU annotations, prokaryotic hosts, AMG, ARG, etc.
+- SQLite database with all HQ results for publication.
+"""
+
+
 import os
 import subprocess
 import pandas as pd
@@ -80,6 +108,15 @@ def create_vOTU_amg(conn_raw, conn_pub, df_vOTU_annotation, output, software):
     return(df_amg_sel_vOTU)
 
 
+def create_vOTU_arg(conn_raw, conn_pub, df_vOTU_annotation, output):
+    df_arg = pd.read_sql_query(f"SELECT * FROM anno_prot_ARG", conn_raw)
+    df_arg_sel_vOTU = filter_by_vOTU(df_arg, df_vOTU_annotation, conn_raw)
+    # output
+    df_arg_sel_vOTU.to_csv(output, index=False, sep="\t")
+    df_arg_sel_vOTU.to_sql('arg', conn_pub, if_exists='replace', index=False)
+    return(df_arg_sel_vOTU)
+
+
 def main():
     wd = os.getcwd()
     path_data = os.path.join(wd, "data/00-raw/d99-db_publish")
@@ -94,10 +131,11 @@ def main():
     df_vOTU_annotation = create_vOTU_annotation(conn_raw, conn_pub, f"{path_target}/vOTU_annotation.tsv.gz")
     df_prokyriotic_hosts = create_vOTU_hosts(conn_raw, conn_pub, df_vOTU_annotation, f"{path_target}/vOTU_prokyriotic_hosts.tsv.gz")
 
-    df_amg_dramv = create_vOTU_amg(conn_raw, conn_pub, df_vOTU_annotation, f"{path_target}/AMG_DRAMv.tsv.gz", "dramv")
-    df_amg_vibrant = create_vOTU_amg(conn_raw, conn_pub, df_vOTU_annotation, f"{path_target}/AMG_VIBRANT.tsv.gz", "vibrant")
+    create_vOTU_amg(conn_raw, conn_pub, df_vOTU_annotation, f"{path_target}/AMG_DRAMv.tsv.gz", "dramv")
+    create_vOTU_amg(conn_raw, conn_pub, df_vOTU_annotation, f"{path_target}/AMG_VIBRANT.tsv.gz", "vibrant")
+    create_vOTU_arg(conn_raw, conn_pub, df_vOTU_annotation, f"{path_target}/ARG.tsv.gz")
     os.chdir(path_target)
-    files_tar = ["AMG_DRAMv.tsv.gz", "AMG_VIBRANT.tsv.gz"]
+    files_tar = ["AMG_DRAMv.tsv.gz", "AMG_VIBRANT.tsv.gz", "ARG.tsv.gz"]
     command = ['tar', '-czf', f'{path_target}/gene_annotations.tar.gz'] + files_tar
     subprocess.run(command, check=True, text=True)
 

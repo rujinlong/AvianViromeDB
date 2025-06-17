@@ -21,9 +21,7 @@ params:
   name: "51-fig1"
 ---
 
-**Updated: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S', tz = 'CET')` CET.**
-
-The purpose of this document is ...
+The purpose of this document is to create Figure 1 of the manuscript.
 
 ```{r setup}
 #| message: false
@@ -65,8 +63,6 @@ con <- load_db()
 ```
 
 ## Tasks
-
-The first task is ...
 
 ```{r update geo_coords}
 #| message: false
